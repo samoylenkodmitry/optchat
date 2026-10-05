@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 
 from .export import backup, export_html
-from .jobs import JobBoard
+from .jobs import BATCH_TASKS, JobBoard
 from .ledger import Ledger
 from .memory import Memory, Part
 from .replica import Replica, make_exchange
@@ -52,7 +52,7 @@ class Service:
                                    join_grace=self.config.get("join_grace", 4 * self.config.get("interval", 15)), clock=clock, report=report)
             self.ledger = Ledger(self.store, self.replica)
             self.memory = Memory(self.store, budget)
-            self.board = JobBoard(self.memory, pool=self.replica)
+            self.board = JobBoard(self.memory, pool=self.replica, batch_tasks=BATCH_TASKS)
             self.replica.attach(self.board)
         except BaseException:
             self.store.close()
@@ -96,7 +96,7 @@ class Service:
             self.replica.seal()
             # id: local position (usable with zoom) once ordered; gid: same on every machine.
             return {"id": self.replica.positions.get(gid), "gid": gid, "status": "saved", "ordered": gid in self.replica.sealed,
-                    "compaction_needed": bool(self.board.offered)}
+                    "compaction_needed": self.board.compaction_needed()}
         if method == "view":
             return self.view(args.get("snapshot"), args.get("offset", 0))
         if method == "zoom":
@@ -113,9 +113,11 @@ class Service:
         if method == "compact_read":
             return self.board.read(args["job"], args["offset"])
         if method == "compact_submit":
-            return self.board.submit(args["job"], args["line"])
+            # Sessions started before batching still send a single "line".
+            lines = args["lines"] if "lines" in args else args["line"]
+            return self.board.submit(args["job"], lines, chain=args.get("chain", True))
         if method == "compact_release":
-            return self.board.release(args["job"], args["reason"])
+            return self.board.release(args["job"], args["reason"], args.get("task"))
         if method == "compact_resume":
             return self.board.resume(args["id"], args["n"])
         if method == "export":

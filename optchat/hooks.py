@@ -65,7 +65,7 @@ def ingest(service, event):
     inputs = event.get("tool_input", {})
     if name == "SessionStart":
         service.ledger.session(session, "main")
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Ask the optchat-compactor subagent to summarize them when compaction is pending. Do not record compaction work."}}
+        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Start the optchat-compactor subagent only when OptChat asks for compaction. Do not record compaction work."}}
     # Only a SessionStart event enrolls a session. A child without agent_id must
     # never become a main session through a tool event.
     if service.ledger.session(session) != "main":
@@ -106,5 +106,5 @@ def ingest(service, event):
     else:
         return {"ignored": "unsupported hook"}
     if result.get("compaction_needed") and name == "UserPromptSubmit":
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat has messages without summaries. Start the optchat-compactor subagent in the background when subagents are allowed, and continue your task. The OptChat service makes no model calls."}}
+        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat asks for compaction: many messages wait for summaries. Start one optchat-compactor subagent in the background when subagents are allowed, and continue your task. The OptChat service makes no model calls."}}
     return {}

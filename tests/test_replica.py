@@ -74,12 +74,14 @@ class TwoMachines(unittest.TestCase):
             self.say(service, f"m{at}", f"message {at} " + "x" * 700, at)
         self.clock.t += 10
         self.sync(self.a, self.b, self.a)
-        jobs = 0
+        tasks = jobs = 0
         while (claim := self.a.board.next())["status"] == "claimed":
             read_all(self.a.board, claim["job"])
-            self.a.board.submit(claim["job"], f"user: summary {jobs} " + "s" * 300)
+            self.a.board.submit(claim["job"], [f"user: summary {tasks + k} " + "s" * 300 for k in range(claim["tasks"])])
+            tasks += claim["tasks"]
             jobs += 1
-        self.assertGreater(jobs, 4)
+        self.assertEqual(tasks, 7, "four messages and three merges")
+        self.assertLess(jobs, tasks, "the messages arrive together in one job")
         self.sync(self.a, self.b)
         self.assertEqual(self.b.board.next()["status"], "done", "beta reuses alpha's summaries instead of new jobs")
         self.assertEqual({k: n.text for k, n in self.b.store.tree.items()}, {k: n.text for k, n in self.a.store.tree.items()})

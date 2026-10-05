@@ -1,6 +1,6 @@
 import unittest
 
-from optchat.jobs import JobBoard
+from optchat.jobs import PAGE, JobBoard
 from optchat.memory import Memory
 from optchat.util import PLACEHOLDER, size
 from .test_memory import Fixture
@@ -48,7 +48,7 @@ class JobTests(Fixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "complete prompt"):
             self.board.submit(job, "user: emoji paste")
         with self.assertRaises(ValueError):
-            self.board.read(job, 12000)
+            self.board.read(job, PAGE + 1)  # The claim delivered the first page only.
         text = self.read_all(job)
         self.assertIn("😀" * 40000, text)
         self.assertEqual(self.board.submit(job, "user: emoji paste")["status"], "saved")

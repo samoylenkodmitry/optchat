@@ -13,7 +13,8 @@ The idea of a memory that consists of its own compressed history comes from the 
 - Log: every message is appended to `~/.local/share/optchat/chat`, with one write and one fsync per record. Nothing is edited or deleted.
 - Tree: each message gets a summary line of at most 512 bytes. Two neighboring lines merge into one line, two of those merge again, and so on. A short message or a short pair of lines needs no model, because it is its own line.
 - View: a list of tree lines that covers the whole history in about 128 KB. New messages are added at the end. When the view grows too large, the pair that is oldest for its size merges, so detail fades with age.
-- Compaction jobs: lines are summarized in order, and each job carries the view before it as context. A worker subagent calls `compact_next`, reads the job with `compact_read` and submits with `compact_submit`. When a line is too long, the server reports the excess.
+- Compaction jobs: a job holds up to 10 tasks, for example consecutive messages or merges of two lines. The first job of a worker brings the view as context, and later jobs bring only the changes. A worker subagent calls `compact_next`, which returns the job text, and answers with `compact_submit`. The reply to a submit holds the next job, so each job costs one request. A worker sees at most 8,000 characters of a tool call or result, and the log keeps the original.
+- Cost: the `optchat-compactor` subagent runs on Claude Haiku. OptChat asks for it only when at least 20 messages or 40 lines wait, because each new worker reads the whole view.
 - Recording: Claude Code hooks record every session. Codex agents record the messages of the user and their own final replies with `append`.
 
 ## Several machines without an owner

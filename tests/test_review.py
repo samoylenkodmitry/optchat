@@ -165,8 +165,10 @@ class ReviewService(unittest.TestCase):
         if second['status'] == 'waiting':
             self.service.board.clock = lambda: 1e10
             second = self.service.call('compact_next', {}, client='shared')
-        with self.assertRaisesRegex(ValueError, 'complete prompt'):
-            self.service.call('compact_submit', {'job': second['job'], 'line': 'user: text'})
+        # The replacement gets the job text with its own claim.
+        self.assertIn('Task 1', second['text'])
+        self.assertIsNone(second['next_offset'])
+        self.assertEqual(self.service.call('compact_submit', {'job': second['job'], 'line': 'user: text'})['status'], 'saved')
 
     def test_partial_snapshot_preserves_completed_knowledge_and_pending_range(self):
         self.service.call('append', {'event_id': 'a', 'kind': 'user', 'text': 'durable decision'})
