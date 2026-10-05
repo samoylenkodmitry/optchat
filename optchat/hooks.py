@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+from .jobs import ASK_AGAIN
 from .util import atomic_json, json_text, sync_dir, valid_unicode
 
 
@@ -65,7 +66,7 @@ def ingest(service, event):
     inputs = event.get("tool_input", {})
     if name == "SessionStart":
         service.ledger.session(session, "main")
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Start the optchat-compactor subagent only when OptChat asks for compaction. Do not record compaction work."}}
+        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Start the optchat-compactor subagent only after the user agrees. Do not record compaction work."}}
     # Only a SessionStart event enrolls a session. A child without agent_id must
     # never become a main session through a tool event.
     if service.ledger.session(session) != "main":
@@ -106,5 +107,14 @@ def ingest(service, event):
     else:
         return {"ignored": "unsupported hook"}
     if result.get("compaction_needed") and name == "UserPromptSubmit":
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat asks for compaction: many messages wait for summaries. Start one optchat-compactor subagent in the background when subagents are allowed, and continue your task. The OptChat service makes no model calls."}}
+        # Ask once per chat, and again only after ASK_AGAIN more messages. Never
+        # ask while a compactor works.
+        board = service.board
+        waiting, last = board.backlog(), service.asked.get(session)
+        if not board.worker_active() and (last is None or waiting - last >= ASK_AGAIN):
+            service.asked[session] = waiting
+            return {"hookSpecificOutput": {"hookEventName": name, "additionalContext":
+                f"OptChat: {waiting} messages and {len(board.offered)} summary lines wait for summarization. At the end of your reply, "
+                "ask the user one short question: should OptChat summarize the chat history now? Start one optchat-compactor subagent "
+                "in the background only after the user agrees. The user can also type /optchat-compact later."}}
     return {}

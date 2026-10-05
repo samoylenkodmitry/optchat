@@ -18,7 +18,8 @@ TARGET = 480  # Workers aim for this size, so that few lines exceed NODE.
 BATCH_TASKS = 10  # Tasks per job for the service; 1 gives one task per job.
 BATCH_CHARS = 20_000  # Source characters per job, so that a later job fits one page.
 TOOL_CAP = 8_000  # Characters of a tool call or result that a worker sees.
-ASK_MESSAGES, ASK_LINES = 20, 40  # Backlog at which OptChat asks for a compactor.
+ASK_MESSAGES, ASK_LINES = 20, 40  # Backlog at which an agent asks the user about a compactor.
+ASK_AGAIN = 50  # More waiting messages before the same chat is asked again.
 
 _SCALE_TEXT = (
     "user@optchat/claude@mac: Keep the log forever and explain why each change matters. "
@@ -231,6 +232,14 @@ class JobBoard:
 
     def context(self, end):
         return {f"{p.start}+{p.n}": flat(self.memory.text(p)) for p in self.memory.view if p.end <= end and self.memory.built(p)}
+
+    def backlog(self):
+        return self.memory.total - self.frontier
+
+    def worker_active(self, idle=600):
+        """True while a job is leased, or a worker made a call in the last `idle` seconds."""
+        now = self.clock()
+        return bool(self.leases) or any(not w.closed and now - w.touched < idle for w in self.workers.values())
 
     def compaction_needed(self):
         """True when enough work waits to pay for a new worker, which re-reads the whole view."""

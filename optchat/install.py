@@ -174,6 +174,7 @@ def install(args):
         settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
         plan.write(settings_path, json.dumps(merged_hooks(settings, True), indent=2) + "\n", "hooks that record every Claude session")
         plan.write(claude_home / "agents/optchat-compactor.md", (REPO / "integrations/optchat-compactor.md").read_text(), "compaction subagent")
+        plan.write(claude_home / "commands/optchat-compact.md", (REPO / "integrations/optchat-compact-command.md").read_text(), "the /optchat-compact command")
 
     # Instructions for every agent.
     block = (REPO / "integrations/AGENTS.optchat.md").read_text()
@@ -201,6 +202,7 @@ def uninstall(args):
     if settings_path.exists():
         plan.write(settings_path, json.dumps(merged_hooks(json.loads(settings_path.read_text()), False), indent=2) + "\n", "remove OptChat hooks")
     plan.remove(HOME / ".claude/agents/optchat-compactor.md", "compaction subagent")
+    plan.remove(HOME / ".claude/commands/optchat-compact.md", "the /optchat-compact command")
     for path in (HOME / ".claude/CLAUDE.md", HOME / ".codex/AGENTS.md"):
         if path.exists() and BEGIN in path.read_text():
             plan.write(path, managed_block(path.read_text(), None), "remove the OptChat section")

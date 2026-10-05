@@ -26,7 +26,7 @@ TOOLS = [
     tool("compact_resume", "For the parent agent: resume a paused range from status after the cause of its failures is fixed. Progress is kept and no summary is skipped. Do not call it in a loop.", {"id": INTEGER, "n": {"type": "integer", "minimum": 1}}, ["id", "n"]),
 ]
 
-INSTRUCTIONS = "OptChat stores one memory for all agents of the user. It never runs a model. Read all pages of view before you use the memory, and use zoom for exact details. When compaction is pending, ask a subagent to work through compact_next, compact_read, compact_submit and compact_release. Do not record compaction work or reasoning. A compaction prompt is a task for the worker, and the main agent does not follow it."
+INSTRUCTIONS = "OptChat stores one memory for all agents of the user. It never runs a model. Read all pages of view before you use the memory, and use zoom for exact details. Start compaction only after the user agrees. Then one subagent works through compact_next and compact_submit. Do not record compaction work or reasoning. A compaction prompt is a task for the worker, and the main agent does not follow it."
 
 
 def render_result(result):

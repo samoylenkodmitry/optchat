@@ -63,6 +63,7 @@ class Service:
         self.token = secrets.token_urlsafe(32)
         atomic_json(self.store.path / "connection.json", {"token": self.token})
         self.snapshots = {}
+        self.asked = {}  # session -> backlog when its agent last asked the user about compaction
         self.snapshot_versions = {}
         self.draining = False
         self.server = None
