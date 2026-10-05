@@ -4,8 +4,11 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+from . import activity
 from .jobs import ASK_AGAIN
 from .util import atomic_json, json_text, sync_dir, valid_unicode
+
+STALE_TURN = 7200  # Seconds after which an unfinished turn is written out.
 
 
 def ignored(event):
@@ -52,7 +55,21 @@ def project_root(cwd):
     return str(path)
 
 
+def flush_turn(service, session):
+    """Write the held tool calls of a session as one record, then forget them."""
+    keys, origin, items = service.ledger.held(session)
+    if not keys:
+        return
+    text = activity.digest(items)
+    if text:
+        event_id = f"{session}:turn:" + hashlib.sha256("|".join(keys).encode()).hexdigest()[:16]
+        service.call("append", {"event_id": event_id, "kind": "tool", "text": text, "origin": origin})
+    service.ledger.release_turn(session)
+
+
 def ingest(service, event):
+    for stale in service.ledger.stale_turns(time.time() - STALE_TURN):
+        flush_turn(service, stale)  # A turn that never reached Stop.
     exclusion = ignored(event)
     name = event.get("hook_event_name", "")
     session = event.get("session_id")
@@ -85,18 +102,23 @@ def ingest(service, event):
         if not identity:
             raise ValueError("UserPromptSubmit needs an event_id. The hook client supplies one.")
         result = append("user", text, identity)
-    elif name in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+    elif name == "PreToolUse":
+        return {"ignored": "A tool call is recorded once, after it finishes."}
+    elif name in ("PostToolUse", "PostToolUseFailure"):
         identity = event.get("tool_use_id")
         if not identity:
             raise ValueError("Tool hook requires tool_use_id")
-        if name == "PreToolUse":
-            kind, text = "tool", f"{tool} [call={identity}] " + json_text(inputs)
-        else:
-            kind = "echo"
-            content = event.get("tool_response", event.get("error", "Tool failed without a result"))
-            text = f"{tool} [call={identity}] " + (content if isinstance(content, str) else json_text(content))
+        item = activity.compact(event, origin.get("project"))
+        if item is None:
+            return {"ignored": "tool call without lasting value"}
+        if "message" not in item:
+            # Held until the turn ends; Stop turns all calls of the turn into one record.
+            service.ledger.hold(keybase + identity, session, origin, item, time.time())
+            return {}
+        kind, text = item["message"]
         result = append(kind, text, identity)
     elif name == "Stop":
+        flush_turn(service, session)
         text = event.get("last_assistant_message")
         if not isinstance(text, str) or not text:
             return {"ignored": "The event has no final message, and OptChat does not read transcripts."}

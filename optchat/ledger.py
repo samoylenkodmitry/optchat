@@ -21,6 +21,8 @@ class Ledger:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("CREATE TABLE IF NOT EXISTS events (key TEXT PRIMARY KEY, gid TEXT UNIQUE, kind TEXT, text TEXT, date TEXT, digest TEXT, done INTEGER, origin TEXT NOT NULL DEFAULT '{}')")
         self.db.execute("CREATE TABLE IF NOT EXISTS sessions (key TEXT PRIMARY KEY, role TEXT)")
+        # Tool calls of a turn that has not ended yet; Stop turns them into one record.
+        self.db.execute("CREATE TABLE IF NOT EXISTS turn (key TEXT PRIMARY KEY, session TEXT, at REAL, origin TEXT, item TEXT)")
         if "gid" not in {r[1] for r in self.db.execute("PRAGMA table_info(events)")}:
             raise RuntimeError("delivery.sqlite3 is older than replication. Move it away before you start the service.")
         self.db.commit()
@@ -74,6 +76,21 @@ class Ledger:
             self.db.commit()
         row = self.db.execute("SELECT role FROM sessions WHERE key=?", (key,)).fetchone()
         return row[0] if row else None
+
+    def hold(self, key, session, origin, item, at):
+        self.db.execute("INSERT OR IGNORE INTO turn VALUES (?,?,?,?,?)", (key, session, at, json_text(origin), json_text(item)))
+        self.db.commit()
+
+    def held(self, session):
+        rows = self.db.execute("SELECT key, origin, item FROM turn WHERE session=? ORDER BY rowid", (session,)).fetchall()
+        return [k for k, _, _ in rows], (json.loads(rows[-1][1]) if rows else {}), [json.loads(i) for _, _, i in rows]
+
+    def release_turn(self, session):
+        self.db.execute("DELETE FROM turn WHERE session=?", (session,))
+        self.db.commit()
+
+    def stale_turns(self, before):
+        return [s for (s,) in self.db.execute("SELECT session FROM turn GROUP BY session HAVING MAX(at) < ?", (before,))]
 
     def close(self):
         self.db.close()

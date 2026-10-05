@@ -5,8 +5,8 @@ COMPACT = """You write the memory of OptChat. OptChat is one memory for all AI a
 Each message has a kind:
 - user: words that the user wrote.
 - talk: a reply of an agent.
-- tool: a tool call of an agent.
-- echo: the result of a tool call.
+- tool: a short record of what an agent did with its tools in one turn. An older record holds one tool call.
+- echo: a report of a subagent. An older record holds the result of one tool call.
 - note: text that was added to the memory directly.
 The prefix of a message names its origin in the form kind@project/agent@machine.
 
@@ -24,7 +24,7 @@ Goal: a later agent that reads your line can work as well as if it remembered ev
 
 3. Then come findings and open questions. The replies of agents come after them and get much less space than the words of the user.
 
-4. Tool calls and their results have the lowest value. They fill most of the log, and most of their content is noise. Do not copy them. Describe each one in a few words: what was done, whether it worked (and the error if it failed), what the touched thing is and what it contains, and how it relates to the current task. Do this also when it has no relation to the task. Later this tells an agent what was done already and where things are, also for a task that nobody has planned yet.
+4. Records of tool activity have the lowest value. Keep what changed or failed and where, in a few words. Counts of files that an agent read or searched rarely matter later. An older record of one tool call or result also needs only a few words: what was done, whether it worked (and the error if it failed), and what the touched thing is. Later this tells an agent what was done already and where things are.
 
 Try not to drop an item completely. An agent can never find an item that the line does not mention. One or two words are enough to keep an item findable. When space is short, give most of it to the important items and give each minor item just enough words to name it. Drop an item only when no agent is likely to need it and its space is worth much more for other items.
 

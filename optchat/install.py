@@ -23,7 +23,7 @@ HOME = Path.home()
 CONFIG = HOME / ".config/optchat/config.json"
 LABEL = "optchat.memory"
 BEGIN, END = "<!-- optchat:begin -->", "<!-- optchat:end -->"
-HOOK_EVENTS = {"SessionStart": None, "UserPromptSubmit": None, "PreToolUse": ".*", "PostToolUse": ".*", "PostToolUseFailure": ".*", "Stop": None}
+HOOK_EVENTS = {"SessionStart": None, "UserPromptSubmit": None, "PostToolUse": ".*", "PostToolUseFailure": ".*", "Stop": None}
 
 
 def hook_command():
@@ -105,9 +105,12 @@ def managed_block(text: str, block: str | None) -> str:
 def merged_hooks(settings: dict, install: bool) -> dict:
     hooks = settings.setdefault("hooks", {})
     command = hook_command()
-    for event, matcher in HOOK_EVENTS.items():
+    # Remove the OptChat hook from every event, also from events that install
+    # no longer uses, then add it back for the current events.
+    for event in list(hooks) + [e for e in HOOK_EVENTS if e not in hooks]:
+        matcher = HOOK_EVENTS.get(event)
         entries = [e for e in hooks.get(event, []) if not any(h.get("command") == command for h in e.get("hooks", []))]
-        if install:
+        if install and event in HOOK_EVENTS:
             entry = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
             if matcher:
                 entry = {"matcher": matcher, **entry}

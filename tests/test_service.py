@@ -68,10 +68,13 @@ class ServiceTests(unittest.TestCase):
         self.service.call("hook", {"hook_event_name": "SessionStart", "session_id": "s"})
         self.service.call("hook", {"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt_id": "p", "prompt": "hello"})
         self.service.call("hook", {"hook_event_name": "PreToolUse", "session_id": "s", "tool_use_id": "t", "tool_name": "Read", "tool_input": {"file_path": "README.md"}})
-        self.service.call("hook", {"hook_event_name": "PostToolUse", "session_id": "s", "tool_use_id": "t", "tool_name": "Read", "tool_response": "contents"})
+        self.service.call("hook", {"hook_event_name": "PostToolUse", "session_id": "s", "tool_use_id": "t", "tool_name": "Read", "tool_input": {"file_path": "README.md"}, "tool_response": "FILE CONTENTS"})
         self.service.call("hook", {"hook_event_name": "Stop", "session_id": "s", "turn_id": "turn", "last_assistant_message": "done", "thinking": "NEVER LOG"})
-        self.assertEqual([m.kind for m in self.service.store.root], ["user", "tool", "echo", "talk"])
-        self.assertNotIn("NEVER LOG", json_text([m.text for m in self.service.store.root]))
+        self.assertEqual([m.kind for m in self.service.store.root], ["user", "tool", "talk"])
+        self.assertIn("read 1 file (README.md)", self.service.store.root[1].text)
+        logged = json_text([m.text for m in self.service.store.root])
+        self.assertNotIn("NEVER LOG", logged)
+        self.assertNotIn("FILE CONTENTS", logged, "file contents stay on disk")
 
     def test_recovery_finishes_pending_ledger_write(self):
         ledger = self.service.ledger

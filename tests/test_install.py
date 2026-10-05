@@ -26,10 +26,16 @@ class InstallEdits(unittest.TestCase):
         self.assertEqual(len(merged["hooks"]["Stop"]), 2)
         self.assertIn({"type": "command", "command": "guard"}, merged["hooks"]["PreToolUse"][0]["hooks"])
         commands = [h["command"] for entries in merged["hooks"].values() for e in entries for h in e["hooks"]]
-        self.assertEqual(commands.count(hook_command()), 6)
+        self.assertEqual(commands.count(hook_command()), 5)
         self.assertEqual(merged_hooks(copy.deepcopy(merged), True), merged, "idempotent")
         self.assertEqual(merged_hooks(merged, False), original)
         self.assertEqual(merged_hooks({"hooks": {}}, False), {})
+
+    def test_hooks_of_events_that_install_no_longer_uses_are_removed(self):
+        old = {"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": hook_command(), "timeout": 10}]}]}}
+        merged = merged_hooks(old, True)
+        self.assertNotIn("PreToolUse", merged["hooks"])
+        self.assertIn("PostToolUse", merged["hooks"])
 
 
 if __name__ == "__main__":

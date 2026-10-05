@@ -256,9 +256,10 @@ class ReviewService(unittest.TestCase):
         (root / 'src').mkdir()
         self.service.call('hook', {'hook_event_name': 'SessionStart', 'session_id': 's'})
         for n in ('b', 'a'):
-            self.service.call('hook', {'hook_event_name': 'PostToolUse', 'session_id': 's', 'tool_use_id': n,
-                                      'tool_name': 'Read', 'tool_response': f'result {n}', 'cwd': str(root / 'src')})
-        self.assertIn('Read [call=b]', self.service.store.root[0].text)
+            self.service.call('hook', {'hook_event_name': 'PostToolUse', 'session_id': 's', 'tool_use_id': n, 'tool_name': 'Read',
+                                      'tool_input': {'file_path': str(root / 'src' / f'{n}.py')}, 'tool_response': f'result {n}', 'cwd': str(root / 'src')})
+        self.service.call('hook', {'hook_event_name': 'Stop', 'session_id': 's', 'turn_id': 't', 'last_assistant_message': 'done', 'cwd': str(root / 'src')})
+        self.assertIn('read 2 files (b.py, a.py)', self.service.store.root[0].text)
         self.assertEqual(self.service.store.root[0].origin['project'], str(root.resolve()))
 
     def test_fully_summarized_view_keeps_newest_lines_near_text_budget(self):

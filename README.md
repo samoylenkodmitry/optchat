@@ -15,7 +15,7 @@ The idea of a memory that consists of its own compressed history comes from the 
 - View: a list of tree lines that covers the whole history in about 128 KB. New messages are added at the end. When the view grows too large, the pair that is oldest for its size merges, so detail fades with age.
 - Compaction jobs: a job holds up to 10 tasks, for example consecutive messages or merges of two lines. The first job of a worker brings the view as context, and later jobs bring only the changes. A worker subagent calls `compact_next`, which returns the job text, and answers with `compact_submit`. The reply to a submit holds the next job, so each job costs one request. A worker sees at most 8,000 characters of a tool call or result, and the log keeps the original.
 - Cost: the `optchat-compactor` subagent runs on Claude Haiku. When at least 20 messages or 40 lines wait, the agent asks the user once per chat whether to summarize now, and it starts the subagent only after the user agrees. The question comes again after 50 more messages, and never while a compactor works. The command `/optchat-compact` starts a run at any time.
-- Recording: Claude Code hooks record every session. Codex agents record the messages of the user and their own final replies with `append`.
+- Recording: Claude Code hooks record your prompts and the final replies of the agents word for word. The tool calls of one turn become one short record of what changed and what failed. Exploration is kept only as counts and a few file names, because its content stays on disk. Your answers to agent questions are kept in full. Subagent reports and approved plans are kept up to 4,000 characters. Codex agents record your messages and their final replies with `append`.
 
 ## Several machines without an owner
 
@@ -99,7 +99,7 @@ A `flock` makes one service the only writer of a chat directory. The operating s
 
 - The Claude Code and Codex sessions own their context and their cache. Clear a session to start fresh. The agent then reads the memory again.
 - The worker subagent decides the quality of a summary. The server checks order and size, and it checks that the worker read the whole input.
-- The memory holds only what the hooks or explicit `append` calls record. Tool results are cut to 30,000 characters, and both ends stay.
+- The memory keeps no file contents and no tool output. Agents should write what they learned into their replies.
 - The log is permanent. Do not paste secrets into recorded sessions.
 
 ## Tests
