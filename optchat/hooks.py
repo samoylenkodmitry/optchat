@@ -110,11 +110,16 @@ def ingest(service, event):
         # Ask once per chat, and again only after ASK_AGAIN more messages. Never
         # ask while a compactor works.
         board = service.board
-        waiting, last = board.backlog(), service.asked.get(session)
-        if not board.worker_active() and (last is None or waiting - last >= ASK_AGAIN):
-            service.asked[session] = waiting
+        backlog, last = board.backlog(), service.asked.get(session)
+        if not board.worker_active() and (last is None or len(backlog) - last >= ASK_AGAIN):
+            service.asked[session] = len(backlog)
+            chats = len({m.origin.get("session") for m in backlog})
+            here = sum(m.origin.get("session") == session for m in backlog)
+            tools = sum(m.kind in ("tool", "echo") for m in backlog)
+            question = (f"OptChat has {len(backlog)} messages from {chats} recorded chat{'s' if chats != 1 else ''} that wait for summaries, "
+                        f"{here} of them from this chat. Summarize them now?")
             return {"hookSpecificOutput": {"hookEventName": name, "additionalContext":
-                f"OptChat: {waiting} messages and {len(board.offered)} summary lines wait for summarization. At the end of your reply, "
-                "ask the user one short question: should OptChat summarize the chat history now? Start one optchat-compactor subagent "
-                "in the background only after the user agrees. The user can also type /optchat-compact later."}}
+                f"OptChat: {len(backlog)} messages wait for summaries ({tools} of them are tool calls or tool results). "
+                f"At the end of your reply, ask the user exactly this question: \"{question}\" "
+                "Start one optchat-compactor subagent in the background only after the user agrees. The user can also type /optchat-compact later."}}
     return {}

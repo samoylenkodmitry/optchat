@@ -234,7 +234,9 @@ class JobBoard:
         return {f"{p.start}+{p.n}": flat(self.memory.text(p)) for p in self.memory.view if p.end <= end and self.memory.built(p)}
 
     def backlog(self):
-        return self.memory.total - self.frontier
+        """Messages that still need a worker: unsummarized and too long to be their own line."""
+        root, tree = self.memory.store.root, self.memory.store.tree
+        return [m for m in root[self.frontier:] if (0, m.i) not in tree and size(m.compact_source) > NODE]
 
     def worker_active(self, idle=600):
         """True while a job is leased, or a worker made a call in the last `idle` seconds."""
@@ -243,7 +245,7 @@ class JobBoard:
 
     def compaction_needed(self):
         """True when enough work waits to pay for a new worker, which re-reads the whole view."""
-        return self.memory.total - self.frontier >= ASK_MESSAGES or len(self.offered) >= ASK_LINES
+        return len(self.backlog()) >= ASK_MESSAGES or len(self.offered) >= ASK_LINES
 
     def long_source(self, p):
         return self.state.get(self.state_key(p), {}).get("progress") is not None or len(self.source(p)) > SOURCE_CHUNK

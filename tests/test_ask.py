@@ -30,7 +30,7 @@ class AskBeforeCompaction(unittest.TestCase):
     def test_agent_asks_once_then_again_after_more_messages(self):
         self.note(ASK_MESSAGES)
         first = self.prompt()
-        self.assertIn("ask the user one short question", first)
+        self.assertIn(f"OptChat has {ASK_MESSAGES} messages from 1 recorded chat that wait for summaries", first)
         self.assertIn("only after the user agrees", first)
         self.assertEqual(self.prompt(), "", "follow-up questions in the same chat bring no new request")
         self.note(ASK_AGAIN)
