@@ -38,12 +38,14 @@ def endpoint(chat):
 
 
 class Service:
-    def __init__(self, chat, *, budget=VIEW, config=None, clock=time.time):
+    def __init__(self, chat, *, budget=VIEW, config=None, clock=time.time, wait=False):
         # config=None means a memory for this machine only. The CLI passes the machine
         # config only for the configured chat directory (see config.py).
         self.config = config or {}
         report = lambda s: print(s, file=sys.stderr, flush=True)
-        self.store = Store(Path(chat), report)
+        # wait=True: a managed service (launchd, systemd) waits for the lock and
+        # takes over when another copy stops, so it does not exit and restart in a loop.
+        self.store = Store(Path(chat), report, wait=wait)
         try:
             self.replica = Replica(self.store, name=self.config.get("machine") or socket.gethostname().split(".")[0],
                                    exchange=make_exchange(self.config), offline_after=self.config.get("offline_after", 600),

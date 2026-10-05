@@ -72,13 +72,13 @@ class Store:
     lock file: all writers must lock the same inode.
     """
 
-    def __init__(self, path: Path, report: Callable[[str], None] = print):
+    def __init__(self, path: Path, report: Callable[[str], None] = print, wait: bool = False):
         self.path = path.expanduser().resolve()
         self.path.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.report = report
         self._lock = os.open(self.path / "lock", os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(self._lock, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             os.close(self._lock)
             self._lock = -1

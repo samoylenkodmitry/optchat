@@ -142,7 +142,7 @@ def install(args):
     env = {"PYTHONPATH": str(REPO), "OPTCHAT_CONFIG": str(CONFIG)}
     if sys.platform == "darwin":
         plist = HOME / f"Library/LaunchAgents/{LABEL}.plist"
-        body = plistlib.dumps({"Label": LABEL, "ProgramArguments": [python(), "-m", "optchat", "--chat", str(chat), "serve"],
+        body = plistlib.dumps({"Label": LABEL, "ProgramArguments": [python(), "-m", "optchat", "--chat", str(chat), "serve", "--wait"],
                                "EnvironmentVariables": env, "RunAtLoad": True, "KeepAlive": True,
                                "StandardOutPath": str(chat / "service.log"), "StandardErrorPath": str(chat / "service.log")}).decode()
         plan.write(plist, body, "start at login and after an exit")
@@ -151,7 +151,7 @@ def install(args):
         unit = HOME / ".config/systemd/user/optchat.service"
         body = "\n".join(["[Unit]", "Description=OptChat memory service (it runs no models)", "After=network-online.target", "",
                           "[Service]", *[f"Environment={k}={v}" for k, v in env.items()],
-                          f"ExecStart={python()} -m optchat --chat {chat} serve", "Restart=always", "RestartSec=10", "",
+                          f"ExecStart={python()} -m optchat --chat {chat} serve --wait", "Restart=always", "RestartSec=10", "",
                           "[Install]", "WantedBy=default.target", ""])
         plan.write(unit, body, "start at boot and after an exit")
         plan.run(["systemctl", "--user", "daemon-reload"], "load the unit")

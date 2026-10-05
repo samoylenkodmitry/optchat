@@ -14,7 +14,8 @@ def parser():
     p.add_argument("--chat", type=Path, default=DEFAULT_CHAT)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("mcp", help="Serve MCP over stdio, and start the memory service if it is not running")
-    sub.add_parser("serve", help="Run the memory service in the foreground")
+    srv = sub.add_parser("serve", help="Run the memory service in the foreground")
+    srv.add_argument("--wait", action="store_true", help="If another copy holds the lock, wait for it and take over when it stops")
     sub.add_parser("status")
     sub.add_parser("stop", help="Stop the memory service. The history stays on disk.")
     sub.add_parser("view")
@@ -53,7 +54,7 @@ def main():
             return
         if args.command == "serve":
             from .config import load_config
-            asyncio.run(Service(args.chat, config=load_config(args.chat)).serve()); return
+            asyncio.run(Service(args.chat, config=load_config(args.chat), wait=args.wait).serve()); return
         client = Client(args.chat, autostart=args.command != "stop")
         if args.command == "mcp":
             serve_stdio(client); return
