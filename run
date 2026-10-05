@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs from any working directory without installing a package.
+OPTCHAT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$OPTCHAT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m optchat "$@"

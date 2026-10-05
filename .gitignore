@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+chat/
+examples/demo-chat/
+.DS_Store
+# The original OptChat specification is not ours to publish; see README.
+docs/SPEC.md
+# Development notes from the session that built this; not part of the published repository.
+docs/VERIFICATION.md

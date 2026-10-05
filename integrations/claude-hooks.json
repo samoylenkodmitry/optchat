@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}],
+    "PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}],
+    "PostToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}],
+    "PostToolUseFailure": [{"matcher": ".*", "hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "/path/to/optchat/run hook", "timeout": 10}]}]
+  }
+}

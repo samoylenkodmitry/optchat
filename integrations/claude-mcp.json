@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "optchat": {
+      "command": "/path/to/optchat/run",
+      "args": ["mcp"]
+    }
+  }
+}
