@@ -91,6 +91,7 @@ def main():
             for index, record in enumerate(records):
                 payload = {"event_id": f"import:{identity}:{index}", "kind": record.get("kind", "note"), "text": record["text"]}
                 if "date" in record: payload["date"] = record["date"]
+                if record.get("origin"): payload["origin"] = record["origin"]
                 client.call("append", payload)
             result = {"imported": len(records), "instruction": "Agents summarize the new messages through the MCP compaction tools."}
         elif args.command in ("export", "backup"):

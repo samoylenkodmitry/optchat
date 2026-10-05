@@ -74,7 +74,7 @@ Without a config file, OptChat keeps a memory for one machine only.
 ./run view
 ./run zoom 0 1
 ./run append note 'A decision to keep.'
-./run import old-notes.txt          # or a .jsonl file of {kind, text, date}
+./run import old-notes.txt          # or a .jsonl file of {kind, text, date, origin}
 ./run export memory.html            # every original message and every tree level
 ./run backup memory.tar.gz
 ./run stop                          # the history stays on disk
