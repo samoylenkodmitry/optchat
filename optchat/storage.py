@@ -20,7 +20,7 @@ def normalize_origin(origin):
     if not isinstance(origin, dict) or set(origin) - {"project", "session", "agent", "machine"}:
         raise ValueError("origin accepts project, session, agent and machine")
     if any(not isinstance(v, str) or not v or len(v) > 500 for v in origin.values()):
-        raise ValueError("Origin values must contain 1–500 characters")
+        raise ValueError("Each origin value needs 1 to 500 characters.")
     return {k: valid_unicode(v) for k, v in sorted(origin.items())}
 
 
@@ -65,10 +65,11 @@ class Node:
 
 
 class Store:
-    """Single-process owner. One write + fsync per immutable JSONL record.
+    """The only writer of a chat directory: one write and one fsync per JSONL record.
 
-    flock is atomic, survives no owner crash, and needs no stale-socket unlink
-    race. Never unlink the lock file: all owners must lock the same inode.
+    The writer holds a flock on the lock file. The operating system releases it
+    when the process ends, so no stale lock file needs removal. Never delete the
+    lock file: all writers must lock the same inode.
     """
 
     def __init__(self, path: Path, report: Callable[[str], None] = print):
@@ -146,19 +147,19 @@ class Store:
             if key in self.tree:
                 raise StorageError(f"Duplicate tree node {key}")
             self.tree[key] = n
-        # A missing cached child can be rebuilt, but cannot be silently exposed
-        # under a stored ancestor until reconstruction completes.
+        # A missing child can be rebuilt. Its stored ancestor stays hidden until
+        # the child exists again.
 
     def _append(self, stream: str, value: object):
         if self._lock < 0 or self._poisoned:
-            raise StorageError("Store is closed or a previous write failed; reopen before continuing")
+            raise StorageError("The store is closed, or a previous write failed. Open it again before you continue.")
         file = self.path / stream / (datetime.now().astimezone().date().isoformat() + ".jsonl")
         is_new = not file.exists()
         data = (json_text(value) + "\n").encode("utf-8")
         fd = os.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:
             if os.write(fd, data) != len(data):
-                raise StorageError("Short log write; stopped to preserve permanent IDs")
+                raise StorageError("A log write was incomplete. Writing stopped to protect the permanent ids.")
             os.fsync(fd)
             if is_new:
                 sync_dir(file.parent)
@@ -169,11 +170,11 @@ class Store:
             os.close(fd)
 
     def _append_many(self, stream: str, values: list):
-        """Several records with one write and one fsync (bulk replication imports)."""
+        """Several records with one write and one fsync, for imports from other machines."""
         if not values:
             return
         if self._lock < 0 or self._poisoned:
-            raise StorageError("Store is closed or a previous write failed; reopen before continuing")
+            raise StorageError("The store is closed, or a previous write failed. Open it again before you continue.")
         file = self.path / stream / (datetime.now().astimezone().date().isoformat() + ".jsonl")
         is_new = not file.exists()
         data = "".join(json_text(v) + "\n" for v in values).encode("utf-8")
@@ -196,7 +197,7 @@ class Store:
 
     def append(self, kind: str, text: str, date: str | None = None, origin=None, gid: str = "") -> Message:
         if kind not in KINDS or not isinstance(text, str):
-            raise ValueError("Invalid message kind or text (reasoning is never a log kind)")
+            raise ValueError("Invalid message kind or text. Reasoning is never recorded.")
         text = valid_unicode(text)
         stamp = date or now()
         if datetime.fromisoformat(stamp).tzinfo is None:

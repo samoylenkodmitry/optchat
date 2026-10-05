@@ -1,4 +1,4 @@
-"""Opt-in Claude hooks: ingest supplied events only, never invoke a model."""
+"""Claude Code hooks: record the supplied events. The hooks never start a model."""
 import hashlib
 import time
 from pathlib import Path
@@ -19,7 +19,7 @@ def ignored(event):
 
 
 def enqueue(chat, event):
-    """Fsync a minimal event before trying IPC; next service call replays it."""
+    """Write the event to disk before delivery. The next service call delivers any event that is still on disk."""
     if ignored(event):
         return None
     fields = {"hook_event_name", "session_id", "cwd", "agent_type", "agent_id", "event_id", "prompt_id", "user_message_id", "turn_id", "prompt", "tool_name", "tool_input", "tool_use_id", "tool_response", "error", "last_assistant_message"}
@@ -36,7 +36,7 @@ def enqueue(chat, event):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     sync_dir(chat)
     path = directory / f"{time.time_ns():020d}-{uuid4().hex}.json"
-    # JSON escapes preserve lone surrogates until normal intake normalization.
+    # JSON escapes keep lone surrogates until intake replaces them.
     import json
     event = json.loads(valid_unicode(json_text(event)))
     atomic_json(path, event)
@@ -57,17 +57,17 @@ def ingest(service, event):
     session = event.get("session_id")
     if not isinstance(session, str) or not session:
         raise ValueError("Hook event lacks session_id")
-    # All subagent activity stays out of the main memory. Parent compactor
-    # delegation and OptChat calls are excluded too, preventing feedback loops.
+    # Subagent activity stays out of the main memory. OptChat calls and the start
+    # of the compactor are excluded too, so compaction never creates new messages.
     if exclusion:
         return {"ignored": exclusion}
     tool = event.get("tool_name", "")
     inputs = event.get("tool_input", {})
     if name == "SessionStart":
         service.ledger.session(session, "main")
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page; zoom for exact details. A partial view explicitly marks missing knowledge: ask the optchat-compactor subagent to complete jobs, or retrieve needed originals. Keep compaction traffic out of the main log."}}
-    # Require SessionStart enrollment: a detached child lacking agent_id must
-    # never silently become a new main session just by emitting a tool event.
+        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Ask the optchat-compactor subagent to summarize them when compaction is pending. Do not record compaction work."}}
+    # Only a SessionStart event enrolls a session. A child without agent_id must
+    # never become a main session through a tool event.
     if service.ledger.session(session) != "main":
         return {"ignored": "session not enrolled by SessionStart"}
     keybase = session + ":" + name + ":"
@@ -78,11 +78,11 @@ def ingest(service, event):
         return service.call("append", {"event_id": keybase + str(identity), "kind": kind, "text": text, "origin": origin})
     if name == "UserPromptSubmit":
         text = event.get("prompt", "")
-        # Newer clients provide a prompt/message id. If absent, caller must
-        # supply event_id; don't collapse two identical user messages by hash.
+        # Newer clients send a prompt or message id. Without it the caller must
+        # supply event_id, so two identical user messages stay separate.
         identity = event.get("event_id") or event.get("prompt_id") or event.get("user_message_id")
         if not identity:
-            raise ValueError("UserPromptSubmit needs an event_id (the hook client supplies one)")
+            raise ValueError("UserPromptSubmit needs an event_id. The hook client supplies one.")
         result = append("user", text, identity)
     elif name in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
         identity = event.get("tool_use_id")
@@ -98,13 +98,13 @@ def ingest(service, event):
     elif name == "Stop":
         text = event.get("last_assistant_message")
         if not isinstance(text, str) or not text:
-            return {"ignored": "No final message supplied; transcript scraping is not enabled"}
+            return {"ignored": "The event has no final message, and OptChat does not read transcripts."}
         identity = event.get("event_id") or event.get("turn_id")
         if not identity:
-            raise ValueError("Stop requires a stable turn/event identity (the hook client supplies one)")
+            raise ValueError("Stop needs a stable turn or event id. The hook client supplies one.")
         result = append("talk", text, identity)
     else:
         return {"ignored": "unsupported hook"}
     if result.get("compaction_needed") and name == "UserPromptSubmit":
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat has pending compaction. Use the optchat-compactor subagent when appropriate; the MCP service itself makes no model calls."}}
+        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat has messages without summaries. Start the optchat-compactor subagent in the background when subagents are allowed, and continue your task. The OptChat service makes no model calls."}}
     return {}

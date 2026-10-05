@@ -1,62 +1,70 @@
-# OptChat — one memory for all your coding agents
+# OptChat
 
-OptChat gives every Claude Code and Codex session, on every machine you use, the same long-term memory. Each message (your words, the agent's replies, its tool calls and results) is kept forever, word for word, and folded into a binary tree of one-line summaries. An agent starting a fresh session reads a fixed-size view of the whole history: recent messages one line each, older ones many per line. When a line is too vague, it zooms into the lines it was made from, down to the original message.
+OptChat keeps one memory for the Claude Code and Codex agents of one user, on all of the user's machines. Each message of a session is stored word for word. This includes the tool calls of the agent and their results.
 
-OptChat is an MCP server written in plain Python (3.11+, no dependencies). **It never runs a model and needs no API key.** Summaries are written by your own agents: when work is pending, the agent hands it to a small subagent that claims jobs through MCP tools, writes the summary lines and submits them.
+The messages are folded into a binary tree of one-line summaries. At the start of a session, an agent reads a view of about 128 KB that covers the whole history. Recent messages have one line each, and older lines cover more messages. When a line is too vague, the agent opens it into the two lines from which it was made, down to the original message.
 
-The design follows the OptChat idea of a chat whose memory is its own compressed history, which grew out of [OptMem](https://github.com/VictorTaelin/OptMem). The original specification is not included here.
+OptChat is an MCP server in Python 3.11 or newer, with no dependencies. It never runs a model and needs no API key. The agents write the summaries themselves. When messages wait for summaries, an agent starts a small subagent, which takes jobs through MCP tools and submits the summary lines.
+
+The idea of a memory that consists of its own compressed history comes from the OptChat design, which grew out of [OptMem](https://github.com/VictorTaelin/OptMem). This repository does not include the original specification.
 
 ## How it works
 
-- **Log.** Every message is appended, with one write and fsync per record, to `~/.local/share/optchat/chat`. Nothing is edited or deleted.
-- **Tree.** Message `i` gets a one-line summary of at most 512 bytes. Two adjacent lines merge into one, two of those into one, and so on. Short messages and short pairs need no model; they are their own line.
-- **View.** A list of tree lines that covers the whole history in about 128 KB. New messages append at the end, and the most overdue old pair merges, so detail fades with age.
-- **Compaction jobs.** Lines are summarized strictly in order, and each job carries the view before it as context. A worker subagent calls `compact_next`, reads the job with `compact_read`, and submits with `compact_submit`. If a line is too long, the server says by how much.
-- **Recording.** Claude Code hooks record every session automatically. Codex agents record user messages and their final replies with `append`.
+- Log: every message is appended to `~/.local/share/optchat/chat`, with one write and one fsync per record. Nothing is edited or deleted.
+- Tree: each message gets a summary line of at most 512 bytes. Two neighboring lines merge into one line, two of those merge again, and so on. A short message or a short pair of lines needs no model, because it is its own line.
+- View: a list of tree lines that covers the whole history in about 128 KB. New messages are added at the end. When the view grows too large, the pair that is oldest for its size merges, so detail fades with age.
+- Compaction jobs: lines are summarized in order, and each job carries the view before it as context. A worker subagent calls `compact_next`, reads the job with `compact_read` and submits with `compact_submit`. When a line is too long, the server reports the excess.
+- Recording: Claude Code hooks record every session. Codex agents record the messages of the user and their own final replies with `append`.
 
-## Several machines, no owner
+## Several machines without an owner
 
-Machines share one memory through a folder they can all reach, for example an encrypted rclone remote. Each machine runs its own OptChat service and writes only its own files:
+The machines share one memory through a folder that all of them can reach, for example an encrypted rclone remote. Each machine runs its own OptChat service and writes only its own files:
 
 ```text
-<shared folder>/machines/<machine-id>/messages/<first>-<last>.jsonl.gz   its messages, gzip
-<shared folder>/machines/<machine-id>/summaries/<first>-<last>.jsonl.gz  summaries its agents wrote
-<shared folder>/machines/<machine-id>/heartbeat.json                     "everything I wrote up to T is uploaded"
+<shared folder>/machines/<machine-id>/messages/<first>-<last>.jsonl.gz   messages of this machine
+<shared folder>/machines/<machine-id>/summaries/<first>-<last>.jsonl.gz  summaries that its agents wrote
+<shared folder>/machines/<machine-id>/heartbeat.json                     time up to which everything is uploaded
 ```
 
-Because no file has two writers, a file-level sync can never lose data.
+No file has two writers, so a sync of whole files cannot lose data.
 
-- **One order, no owner.** Every machine orders messages by time once the heartbeats of all active machines have passed them, so machines online together compute the same order on their own.
-- **Offline is fine.** A machine silent for 10 minutes is skipped. What it records while away is placed after the others notice it again. Only that stretch may be grouped differently on each machine; the orders line up again after it.
-- **Shared summaries.** A summary is filed under the exact messages it covers. When one machine's agent writes it, the others reuse it instead of summarizing again.
-- **Reading the folder.** The rclone remote is read directly, not through a mount, so mount caches don't delay the exchange. The folder holds the complete history, compressed. With an encrypted remote it is encrypted at rest.
+- Order: each machine orders the messages by time after the heartbeats of all active machines have passed them. Machines that are online at the same time therefore compute the same order, and no machine acts as an owner.
+- Offline machines: after 10 minutes without a heartbeat, the other machines stop waiting for a machine. When it comes back, the messages that it recorded while away are placed after the point at which the others notice it again. The machines may group that one stretch in different ways. The orders match again after it.
+- Shared summaries: a summary is stored under the exact list of messages that it covers. When an agent on one machine writes it, the other machines reuse it and do not summarize those messages again.
+- Access: the service reads the rclone remote directly, so the cache of a mount cannot delay the exchange. The folder holds the complete history in compressed form. An encrypted remote also keeps it encrypted at rest.
 
-Keep the machines' clocks synchronized (NTP). A large clock skew only delays ordering, or groups a short stretch differently.
+Keep the clocks of the machines synchronized with NTP. A large clock difference delays the order or groups a short stretch in different ways.
 
 ## Install
 
-On each machine, from a clone of this repository:
+On each machine, in a clone of this repository:
 
 ```sh
-./run install --machine laptop --remote my-crypt:optchat      # dry run: shows every change
+./run install --machine laptop --remote my-crypt:optchat
 ./run install --machine laptop --remote my-crypt:optchat --apply
 ```
 
-This writes `~/.config/optchat/config.json` and starts the service at login (launchd on macOS, a systemd user unit on Linux). It also registers the `optchat` MCP server with Claude Code and Codex, adds the recording hooks and the `optchat-compactor` subagent to Claude Code, and appends a short OptChat section to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Every edited file keeps a timestamped backup. `./run uninstall --apply` removes all of it and keeps the memory.
+The first command prints every change. The second command makes the changes:
 
-Without `--remote` settings (no config file), OptChat is a single-machine memory.
+- It writes `~/.config/optchat/config.json`.
+- It starts the service at login, with launchd on macOS or a systemd user unit on Linux.
+- It registers the `optchat` MCP server for Claude Code and Codex.
+- It adds the recording hooks and the `optchat-compactor` subagent to Claude Code.
+- It appends a short OptChat section to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
+
+Every changed file keeps a backup with a time stamp. `./run uninstall --apply` removes all of this and keeps the memory.
+
+Without a config file, OptChat keeps a memory for one machine only.
 
 ## MCP tools
 
-| Tool | Purpose |
-|---|---|
-| `view` | Read the current view in pages (follow `next_offset` with the same `snapshot`). |
-| `zoom(id, n)` | Open line `id+n` into its two halves; `n = 1` returns the original message. |
-| `read_message(id, offset)` | Page through a long original. |
-| `date(id)` | When message `id` was written. |
-| `append(event_id, kind, text, origin)` | Record a message (kinds `user`, `talk`, `tool`, `echo`, `note`). |
-| `status` | Backlog, failures, hook queue and replication state. |
-| `compact_next`, `compact_read`, `compact_submit`, `compact_release`, `compact_resume` | The compaction job protocol used by the worker subagent. |
+- `view`: read the current view in pages. Follow `next_offset` with the same `snapshot`.
+- `zoom(id, n)`: open line `id+n` into its two halves. With `n` set to 1 it returns the original message.
+- `read_message(id, offset)`: read a long original message in pages.
+- `date(id)`: the time of message `id`.
+- `append(event_id, kind, text, origin)`: record a message. The kinds are `user`, `talk`, `tool`, `echo` and `note`.
+- `status`: the backlog, failed jobs, the hook queue and the replication state.
+- `compact_next`, `compact_read`, `compact_submit`, `compact_release`, `compact_resume`: the job protocol of the worker subagent.
 
 ## Commands
 
@@ -64,34 +72,34 @@ Without `--remote` settings (no config file), OptChat is a single-machine memory
 ./run status
 ./run view
 ./run zoom 0 1
-./run append note 'A durable decision.'
-./run import old-notes.txt          # or a .jsonl of {kind, text, date}
-./run export memory.html            # every original, summary and tree level
+./run append note 'A decision to keep.'
+./run import old-notes.txt          # or a .jsonl file of {kind, text, date}
+./run export memory.html            # every original message and every tree level
 ./run backup memory.tar.gz
 ./run stop                          # the history stays on disk
-./run serve                         # foreground service
+./run serve                         # run the service in the foreground
 ```
 
 ## Data and durability
 
 ```text
 ~/.local/share/optchat/chat/
-  main/  tree/          the local order of messages and their summaries (append-only JSONL)
-  own/  remote/         this machine's messages and those received from others
-  pool/  outsum/        summaries received from others and written here
-  delivery.sqlite3      event ids for idempotent hook delivery and crash recovery
+  main/  tree/          local order of the messages and their summaries (append-only JSONL)
+  own/  remote/         messages of this machine and messages from other machines
+  pool/  outsum/        summaries from other machines and summaries written here
+  delivery.sqlite3      event ids for hook delivery and crash recovery
   jobs.json  sync.json  job progress and replication state
   spool/                hook events, written to disk before delivery
 ```
 
-A `flock` makes one service the only writer of a chat directory, and it is released automatically if the process dies. Torn lines from a crash are skipped and reported. Any gap or conflict stops startup instead of guessing. Hook events are written to disk before delivery and replayed after a restart; invalid ones are kept in `spool/failed/`. Job leases expire after five minutes. Explicit failures pause a line after three attempts, until `compact_resume`.
+A `flock` makes one service the only writer of a chat directory. The operating system releases it when the process ends. After a crash, torn lines are skipped and reported. A gap or a conflict stops the start, and the service does not guess. Hook events are written to disk before delivery and are delivered again after a restart. Invalid events stay in `spool/failed/`. Job leases expire after five minutes. After three explicit failures a line pauses until `compact_resume`.
 
 ## Limits
 
-- Your normal Claude and Codex sessions own their context and caching. Clear a session to start fresh; the memory is read again at the start.
-- Summary quality is up to the worker subagent. The server enforces order, size and completeness, not meaning.
-- Recording is as complete as the hooks or explicit appends. Tool results are capped at 30,000 characters (start and end kept).
-- The log is permanent by design. Don't paste secrets into sessions that are recorded.
+- The Claude Code and Codex sessions own their context and their cache. Clear a session to start fresh. The agent then reads the memory again.
+- The worker subagent decides the quality of a summary. The server checks order and size, and it checks that the worker read the whole input.
+- The memory holds only what the hooks or explicit `append` calls record. Tool results are cut to 30,000 characters, and both ends stay.
+- The log is permanent. Do not paste secrets into recorded sessions.
 
 ## Tests
 

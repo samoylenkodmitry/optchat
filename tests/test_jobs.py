@@ -60,7 +60,7 @@ class JobTests(Fixture, unittest.TestCase):
         for n in (600, 550, 560, 580):
             response = self.board.submit(job, "s" * n)
             self.assertEqual(response["status"], "retry")
-            self.assertIn("| ← LIMIT", response["feedback"])
+            self.assertIn("[LIMIT]", response["feedback"])
         result = self.board.submit(job, "s" * 590)
         self.assertEqual(result["bytes"], 550)
         self.assertEqual(self.board.submit(job, "s" * 590), result)

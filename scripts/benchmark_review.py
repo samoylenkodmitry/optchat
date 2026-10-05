@@ -1,4 +1,4 @@
-"""Bounded synthetic benchmark; no models, network, or persistent user data."""
+"""A short synthetic benchmark. It uses no model and no network, and it keeps no data after it ends."""
 import json
 import tempfile
 import time
@@ -52,7 +52,7 @@ def compaction():
                 page = board.read(job.token, offset)
                 chars += len(page['text'])
                 offset = page['next_offset']
-            # Fixed synthetic stand-in measures transport, not semantic quality.
+            # A fixed synthetic summary. The benchmark measures transfer volume only.
             board.submit(job.token, 'user: synthetic benchmark summary ' + 's' * 300)
             jobs += 1
         return {'messages': 1200, 'jobs': jobs, 'workers': workers, 'prompt_characters': chars,

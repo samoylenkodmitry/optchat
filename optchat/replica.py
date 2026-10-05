@@ -1,20 +1,20 @@
-"""Ownerless replication of one shared memory across machines.
+"""Replication of one memory across machines, without an owner.
 
-Machines exchange data through a synced folder (for example an encrypted
-rclone remote). Each machine writes only under machines/<its id>/, so the
-sync can never overwrite another machine's data:
+Machines exchange data through a synced folder, for example an encrypted
+rclone remote. Each machine writes only under machines/<its id>/, so the
+sync can never overwrite the data of another machine:
 
   machines/<id>/messages/<first>-<last>.jsonl.gz   own messages, by own sequence
-  machines/<id>/summaries/<first>-<last>.jsonl.gz  summaries its workers wrote
-  machines/<id>/heartbeat.json                     "everything up to T is uploaded"
+  machines/<id>/summaries/<first>-<last>.jsonl.gz  summaries that its workers wrote
+  machines/<id>/heartbeat.json                     time up to which everything is uploaded
 
-Every machine orders messages by (date, id) once the heartbeats of all active
-machines have passed them, so machines that are online together compute the
-same order without an owner. A machine whose heartbeat is older than
-`offline_after` is skipped; what it wrote while away is appended when it
-arrives. Summaries are shared by the exact message sequence they cover (a
-content key), so any machine's compaction is reused by the others wherever
-their orders agree. The service never starts a model.
+Every machine orders the messages by (time, id) after the heartbeats of all
+active machines have passed them. Machines that are online at the same time
+therefore compute the same order. A machine with a heartbeat older than
+`offline_after` is skipped. Its messages from that time get a later sort time
+and come after the messages that the others placed meanwhile. A summary is
+stored under the exact list of messages that it covers, so the other machines
+reuse it wherever their orders agree. The service never starts a model.
 """
 from __future__ import annotations
 
@@ -256,10 +256,11 @@ class Replica:
         return self.own_by_gid.get(message.gid) or self.remote.get(message.gid) or {"date": message.date}
 
     def order_stamp(self, r):
-        """Sort time: the message date, except for messages a machine recorded
-        while the others could not see it (first start, or back from offline).
-        Those sort when the others are sure to have noticed it again, so they
-        never jump ahead of what the others already placed in the meantime."""
+        """Sort time of a message. In most cases it is the message date.
+        A machine that the others could not see (at its first start, or after
+        an offline time) gives its messages from that time a later sort time:
+        the time at which the others will have noticed it. These messages then
+        come after everything that the others placed meanwhile."""
         if "odate" in r:
             return stamp(r["odate"])
         if r.get("gid") in self.own_by_gid:
@@ -343,7 +344,7 @@ class Replica:
         return {"own": own, "sums": sums, "have": have, "uploaded_seq": self.state["uploaded_seq"], "uploaded_sum": self.state["uploaded_sum"]}
 
     def exchange_round(self, out):
-        """Network I/O only; safe to run on a worker thread. Returns what to apply."""
+        """Network I/O only, so it can run on a worker thread. It returns the data for apply()."""
         ex, me = self.exchange, f"machines/{self.machine}"
         result = {"uploaded_seq": out["uploaded_seq"], "uploaded_sum": out["uploaded_sum"], "machines": {}, "errors": [], "heartbeat": None}
         for kind, records, start in (("messages", out["own"], out["uploaded_seq"]), ("summaries", out["sums"], out["uploaded_sum"])):
@@ -453,7 +454,7 @@ class Replica:
         return {"key": r["key"], "text": valid_unicode(r["text"]), "from": mid}
 
     def sync_once(self):
-        """One blocking exchange round; the daemon runs exchange_round on a worker thread instead."""
+        """One blocking exchange round. The service runs exchange_round on a worker thread."""
         return self.apply(self.exchange_round(self.outgoing()))
 
     def status(self):

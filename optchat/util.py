@@ -20,7 +20,7 @@ def size(text: str) -> int:
 
 
 def valid_unicode(text: str) -> str:
-    """Preserve valid Unicode; replace unpaired surrogate code units visibly."""
+    """Keep valid Unicode. Replace each unpaired surrogate with U+FFFD."""
     return "".join("\ufffd" if 0xD800 <= ord(ch) <= 0xDFFF else ch for ch in text)
 
 
@@ -33,10 +33,10 @@ def flat(text: str) -> str:
 
 
 def cap(text: str, limit: int = CAP) -> str:
-    """Character cap including the omission marker; retain both ends."""
+    """Limit the text to `limit` characters, marker included. Both ends of the text stay."""
     if len(text) <= limit:
         return text
-    marker = f"\n[... {len(text)} original characters; middle omitted ...]\n"
+    marker = f"\n[{len(text)} characters in total; the middle part is not kept]\n"
     keep = max(0, limit - len(marker))
     head = (keep + 1) // 2
     tail = keep // 2
@@ -44,7 +44,7 @@ def cap(text: str, limit: int = CAP) -> str:
 
 
 def chunks(text: str, marks: tuple[int, ...] = MARKS) -> list[str]:
-    """Stable pieces ending at the last newline before each character mark."""
+    """Split the text at the last newline before each character mark."""
     result, start = [], 0
     for mark in marks:
         if mark >= len(text):

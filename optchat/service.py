@@ -1,4 +1,4 @@
-"""Single-writer memory daemon. It never starts a model or reads model auth."""
+"""The memory service: the only writer of a chat directory. It never starts a model and never reads model credentials."""
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +39,7 @@ def endpoint(chat):
 
 class Service:
     def __init__(self, chat, *, budget=VIEW, config=None, clock=time.time):
-        # config=None means a standalone memory; the CLI passes the machine's
+        # config=None means a memory for this machine only. The CLI passes the machine
         # config only for the configured chat directory (see config.py).
         self.config = config or {}
         report = lambda s: print(s, file=sys.stderr, flush=True)
@@ -106,7 +106,7 @@ class Service:
         if method == "compact_next":
             worker = args.get("worker")
             if worker is not None and (not isinstance(worker, str) or worker not in self.board.workers):
-                raise ValueError("Unknown worker token. Start a fresh invocation with compact_next() without a token")
+                raise ValueError("Unknown worker token. Start a new invocation with compact_next() without a token.")
             return self.board.next(worker)
         if method == "compact_read":
             return self.board.read(args["job"], args["offset"])
@@ -147,20 +147,20 @@ class Service:
                         del self.snapshots[token]
                         self.snapshot_versions.pop(saved['version'], None)
                 if len(self.snapshots) >= 128:
-                    raise ValueError("128 view snapshots are actively leased; retry later without discarding your current snapshot")
+                    raise ValueError("128 view snapshots are in use. Try again later, and keep the snapshot that you are reading.")
                 snapshot = secrets.token_urlsafe(16)
                 text, covered = self.memory.bounded_view(self.board.frontier)
                 pending = {"start": self.board.frontier, "count": self.memory.total - self.board.frontier}
-                omitted = {"start": covered, "count": self.board.frontier - covered, "reason": "view_over_budget", "instruction": "These originals have summaries, but larger merges are still needed to fit the view; use zoom/read_message for them."}
+                omitted = {"start": covered, "count": self.board.frontier - covered, "reason": "view_over_budget", "instruction": "These messages have summaries. The view has no room for them until larger merges exist. Read them with zoom or read_message."}
                 self.snapshots[snapshot] = {"text": text, "accessed": now, "version": version,
                     "status": "ready" if covered == self.memory.total else "partial", "pending": pending, "omitted": omitted,
-                    # Recorded here or received from another machine, not yet placed in the
-                    # shared order (waiting for the other machines' check-ins).
+                    # Messages that this machine recorded or received and that have no place in
+                    # the shared order yet. They wait for the check-ins of the other machines.
                     "unordered": len(self.replica.unordered()),
                     "blocked": self.status()["failures"]}
                 self.snapshot_versions[version] = snapshot
         if snapshot not in self.snapshots:
-            raise ValueError("View snapshot expired; restart at offset 0")
+            raise ValueError("The view snapshot has expired. Start again at offset 0.")
         saved = self.snapshots[snapshot]
         saved['accessed'] = time.monotonic()
         text = saved["text"]
@@ -168,7 +168,7 @@ class Service:
             raise ValueError("Invalid view offset")
         end = min(len(text), offset + 24_000)
         return {"status": saved["status"], "pending": saved["pending"], "omitted": saved["omitted"], "unordered": saved["unordered"], "failures": saved["blocked"], "snapshot": snapshot, "offset": offset, "next_offset": end if end < len(text) else None, "total": len(text), "text": text[offset:end],
-                "instruction": "Read all pages. Only completed summaries appear here. A pending range is missing knowledge, not evidence of absence: compact it, or read its exact original messages with zoom(id,1)/read_message before relying on it. Never infer pending contents. Blocked nodes require explicit compact_resume after addressing the failure."}
+                "instruction": "Read all pages. The view holds only finished summaries. A pending range is knowledge that is missing from the view, and its content is unknown. Compact it, or read the original messages with zoom(id, 1) or read_message before you rely on them. Never guess the content of a pending range. A blocked line needs compact_resume after its cause is fixed."}
 
     def flush_hooks(self, current=None):
         from .hooks import ingest
@@ -224,7 +224,7 @@ class Service:
             await writer.wait_closed()
 
     async def serve(self):
-        # Only the flock owner may remove a stale socket, preventing takeover races.
+        # Only the flock owner removes a stale socket. No second service can take it over.
         self.path.unlink(missing_ok=True)
         self.server = await asyncio.start_unix_server(self.handle, str(self.path), limit=32 * 1024 * 1024)
         os.chmod(self.path, 0o600)
@@ -245,7 +245,7 @@ class Service:
             self.close()
 
     async def replicate(self):
-        """Exchange with the shared folder every `interval` seconds; network I/O runs off the service thread."""
+        """Exchange data with the shared folder every `interval` seconds. Network I/O runs on a worker thread."""
         loop = asyncio.get_running_loop()
         while not self.stopping.is_set():
             try:
@@ -308,7 +308,7 @@ class Client:
             threading.Thread(target=proc.wait, daemon=True).start()
         finally:
             os.close(log)
-        # Bounded IPC startup wait, never a model/compaction polling loop.
+        # Wait a bounded time for the service socket. This loop never waits on a model.
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             try:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "optchat"
 version = "0.1.0"
-description = "Model-free MCP memory and agent-driven binary compaction jobs"
+description = "One memory for the coding agents of one user, served over MCP. It runs no models."
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = []

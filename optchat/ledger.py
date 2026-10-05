@@ -1,4 +1,4 @@
-"""Idempotent event ingestion, including the crash between intent and journal write.
+"""Records each event once, also after a crash between the intent and the journal write.
 
 Recorded events go to this machine's own journal with a global id
 "<machine>/<seq>"; the replica then places them in the shared order.
@@ -22,7 +22,7 @@ class Ledger:
         self.db.execute("CREATE TABLE IF NOT EXISTS events (key TEXT PRIMARY KEY, gid TEXT UNIQUE, kind TEXT, text TEXT, date TEXT, digest TEXT, done INTEGER, origin TEXT NOT NULL DEFAULT '{}')")
         self.db.execute("CREATE TABLE IF NOT EXISTS sessions (key TEXT PRIMARY KEY, role TEXT)")
         if "gid" not in {r[1] for r in self.db.execute("PRAGMA table_info(events)")}:
-            raise RuntimeError("delivery.sqlite3 predates replication; move it aside before starting")
+            raise RuntimeError("delivery.sqlite3 is older than replication. Move it away before you start the service.")
         self.db.commit()
         self.failed = False
         for key, gid, kind, text, date, origin in self.db.execute("SELECT key,gid,kind,text,date,origin FROM events WHERE done=0").fetchall():
@@ -39,9 +39,9 @@ class Ledger:
 
     def append(self, key, kind, text, date=None, origin=None):
         if self.failed:
-            raise RuntimeError("A previous delivery failed; restart the service to recover its durable intent")
+            raise RuntimeError("A previous delivery failed. Restart the service, which then completes the saved intent.")
         if not isinstance(key, str) or not key or len(key) > 500:
-            raise ValueError("A stable event_id of 1–500 characters is required")
+            raise ValueError("A stable event_id of 1 to 500 characters is required.")
         if kind not in {"user", "talk", "tool", "echo", "note"} or not isinstance(text, str):
             raise ValueError("Invalid message kind/text")
         text = valid_unicode(text)

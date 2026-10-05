@@ -206,7 +206,7 @@ class UtilityTests(unittest.TestCase):
         self.assertEqual(len(result), 30000)
         self.assertTrue(result.startswith("head"))
         self.assertTrue(result.endswith("tail"))
-        self.assertIn("omitted", result)
+        self.assertIn("not kept", result)
 
     def test_cache_chunks_are_lossless_and_stable(self):
         text = "line\n" * 30000

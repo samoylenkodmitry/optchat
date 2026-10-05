@@ -40,7 +40,7 @@ class ReviewJobs(Fixture, unittest.TestCase):
             self.assertEqual(response['status'], 'claimed')
             job = self.board.leases[response['job']]
             prompt = read_all(self.board, job.token)
-            update_text = prompt.split('Context update (apply to your retained map):\n')[1].split('\n\nSource origin:')[0]
+            update_text = prompt.split('Context update:\n')[1].split('\n\n')[0]
             update = json.loads(update_text)
             for key in update['remove']:
                 del retained[key]
@@ -201,7 +201,7 @@ class ReviewService(unittest.TestCase):
         payload = {'event_id': 'a', 'kind': 'user', 'text': 'recover me', 'origin': {'project': '/alpha'}}
         with patch.object(self.service.replica, 'record', side_effect=OSError('disk unavailable')):
             with self.assertRaises(OSError): self.service.call('append', payload)
-        with self.assertRaisesRegex(RuntimeError, 'restart'): self.service.call('append', payload)
+        with self.assertRaisesRegex(RuntimeError, '(?i)restart'): self.service.call('append', payload)
         self.service.close()
         self.service = Service(self.path)
         self.assertEqual(self.service.call('append', payload)['id'], 0)
@@ -292,7 +292,7 @@ class ReviewService(unittest.TestCase):
         self.service.call('append', {'event_id': 'prompt', 'kind': 'user', 'text': 'x' * 1000})
         job = self.service.call('compact_next', {})
         prompt = read_all(self.service.board, job['job'])
-        self.assertIn('retained context map', prompt)
+        self.assertIn('map from range labels', prompt)
         self.assertNotIn('<chat> is', prompt)
         self.assertNotIn('one endless chat', prompt)
         self.assertNotIn('subagent reports as', prompt)

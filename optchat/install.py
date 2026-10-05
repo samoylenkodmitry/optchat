@@ -1,8 +1,8 @@
-"""Set up OptChat for every Claude/Codex session on this machine, or remove it.
+"""Set up OptChat for every Claude Code and Codex session on this machine, or remove it.
 
-Dry run by default: prints each change. With --apply it writes the files,
-keeping a timestamped backup of every existing file it edits. Uninstall
-removes only what install added; the memory itself stays on disk.
+Without --apply it only prints each change. With --apply it writes the files and
+keeps a backup with a time stamp next to every file that it changes. Uninstall
+removes only what install added, and the memory stays on disk.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def hook_command():
 
 
 def python():
-    # A stable interpreter path that survives minor upgrades.
+    # This path of the interpreter stays the same across minor Python upgrades.
     return shutil.which("python3") or sys.executable
 
 
@@ -72,7 +72,7 @@ class Plan:
 
 
 def managed_block(text: str, block: str | None) -> str:
-    """Insert, replace or (block=None) remove the managed section of an instruction file."""
+    """Add or replace the OptChat section of an instruction file. With block=None, remove it."""
     if BEGIN in text and END in text:
         before, rest = text.split(BEGIN, 1)
         after = rest.split(END, 1)[1]
@@ -118,23 +118,23 @@ def install(args):
     if args.apply:
         chat.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    # Autostart of the memory service (no models).
+    # Start the memory service automatically. It runs no models.
     env = {"PYTHONPATH": str(REPO), "OPTCHAT_CONFIG": str(CONFIG)}
     if sys.platform == "darwin":
         plist = HOME / f"Library/LaunchAgents/{LABEL}.plist"
         body = plistlib.dumps({"Label": LABEL, "ProgramArguments": [python(), "-m", "optchat", "--chat", str(chat), "serve"],
                                "EnvironmentVariables": env, "RunAtLoad": True, "KeepAlive": True,
                                "StandardOutPath": str(chat / "service.log"), "StandardErrorPath": str(chat / "service.log")}).decode()
-        plan.write(plist, body, "start at login, restart if it exits")
+        plan.write(plist, body, "start at login and after an exit")
         plan.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], "reload", check=False)
         plan.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", plist], "start now")
     else:
         unit = HOME / ".config/systemd/user/optchat.service"
-        body = "\n".join(["[Unit]", "Description=OptChat shared memory (no models)", "After=network-online.target", "",
+        body = "\n".join(["[Unit]", "Description=OptChat memory service (it runs no models)", "After=network-online.target", "",
                           "[Service]", *[f"Environment={k}={v}" for k, v in env.items()],
                           f"ExecStart={python()} -m optchat --chat {chat} serve", "Restart=always", "RestartSec=10", "",
                           "[Install]", "WantedBy=default.target", ""])
-        plan.write(unit, body, "start at boot (user lingering), restart if it exits")
+        plan.write(unit, body, "start at boot and after an exit")
         plan.run(["systemctl", "--user", "daemon-reload"], "load the unit")
         plan.run(["systemctl", "--user", "enable", "--now", "optchat.service"], "start now")
 
@@ -146,29 +146,29 @@ def install(args):
         elif registered(cli):
             print(f"  ok  {cli} MCP server 'optchat' already registered")
         else:
-            plan.run(argv, f"register the memory tools in every {cli} session")
+            plan.run(argv, f"make the memory tools available in every {cli} session")
 
-    # Automatic recording of every Claude session, and the compactor subagent.
+    # Hooks record every Claude session. The compactor subagent writes summaries.
     claude_home = HOME / ".claude"
     if shutil.which("claude") or claude_home.exists():
         settings_path = claude_home / "settings.json"
         settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-        plan.write(settings_path, json.dumps(merged_hooks(settings, True), indent=2) + "\n", "hooks record every Claude session")
+        plan.write(settings_path, json.dumps(merged_hooks(settings, True), indent=2) + "\n", "hooks that record every Claude session")
         plan.write(claude_home / "agents/optchat-compactor.md", (REPO / "integrations/optchat-compactor.md").read_text(), "compaction subagent")
 
-    # Global instructions for every agent.
+    # Instructions for every agent.
     block = (REPO / "integrations/AGENTS.optchat.md").read_text()
     targets = [claude_home / "CLAUDE.md"] + ([HOME / ".codex/AGENTS.md"] if (HOME / ".codex").exists() or shutil.which("codex") else [])
     for path in targets:
         old = path.read_text() if path.exists() else ""
-        plan.write(path, managed_block(old, block), "OptChat section appended; your text is kept")
+        plan.write(path, managed_block(old, block), "adds the OptChat section; your own text stays")
     if not args.apply:
         print("Dry run only. Re-run with --apply to make these changes.")
 
 
 def uninstall(args):
     plan = Plan(args.apply)
-    print("OptChat uninstall (the memory data stays on disk):")
+    print("OptChat uninstall. The memory stays on disk:")
     if sys.platform == "darwin":
         plan.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], "stop", check=False)
         plan.remove(HOME / f"Library/LaunchAgents/{LABEL}.plist", "autostart")

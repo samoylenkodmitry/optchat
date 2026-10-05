@@ -94,7 +94,7 @@ class Memory:
         return m
 
     def node_built(self, p: Part):
-        # Reconnect any previously stored ancestors after repairing a torn cache.
+        # Reconnect stored ancestors after a missing child was rebuilt.
         while p.key in self.store.tree:
             if p.l and not all((p.l - 1, p.i * 2 + j) in self.complete for j in (0, 1)):
                 break
@@ -137,7 +137,7 @@ class Memory:
         return "<chat>\n" + "\n".join(lines) + "\n</chat>"
 
     def bounded_view(self, end):
-        # Match fit(): VIEW budgets summary text, not transport range labels.
+        # Match fit(): the VIEW budget counts only summary text. Range labels do not count.
         lines, used, covered = [], 0, 0
         for p in self.view:
             if p.end > end or not self.built(p):

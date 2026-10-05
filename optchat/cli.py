@@ -10,13 +10,13 @@ from .service import Client, DEFAULT_CHAT, Service
 
 
 def parser():
-    p = argparse.ArgumentParser(description="OptChat: model-free shared memory and compaction jobs over MCP")
+    p = argparse.ArgumentParser(description="OptChat: one memory for Claude Code and Codex agents, served over MCP. It never runs a model.")
     p.add_argument("--chat", type=Path, default=DEFAULT_CHAT)
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("mcp", help="Serve MCP over stdio; auto-start the memory-only daemon")
-    sub.add_parser("serve", help="Run the single-writer memory daemon in the foreground")
+    sub.add_parser("mcp", help="Serve MCP over stdio, and start the memory service if it is not running")
+    sub.add_parser("serve", help="Run the memory service in the foreground")
     sub.add_parser("status")
-    sub.add_parser("stop", help="Stop the memory service; history stays on disk")
+    sub.add_parser("stop", help="Stop the memory service. The history stays on disk.")
     sub.add_parser("view")
     z = sub.add_parser("zoom"); z.add_argument("id", type=int); z.add_argument("n", type=int, nargs="?", default=1)
     d = sub.add_parser("date"); d.add_argument("id", type=int)
@@ -24,18 +24,18 @@ def parser():
     for name in ("export", "backup"):
         cmd = sub.add_parser(name); cmd.add_argument("output", type=Path)
     imp = sub.add_parser("import"); imp.add_argument("source", type=Path)
-    sub.add_parser("hook", help="Ingest a Claude hook JSON event from stdin; no model invocation")
-    call = sub.add_parser("call", help="Call a local memory method with JSON arguments")
+    sub.add_parser("hook", help="Record a Claude Code hook event (JSON on stdin)")
+    call = sub.add_parser("call", help="Call a memory method with JSON arguments")
     call.add_argument("method"); call.add_argument("arguments", nargs="?", default="{}")
-    ins = sub.add_parser("install", help="Set up autostart, MCP, hooks and global instructions on this machine (dry run unless --apply)")
+    ins = sub.add_parser("install", help="Set up OptChat for every agent session on this machine. Without --apply it only prints the changes.")
     ins.add_argument("--machine", required=True, help="Short name of this machine, e.g. laptop or desktop")
     ins.add_argument("--remote", required=True, help="rclone remote path of the shared folder, e.g. my-crypt:optchat")
-    ins.add_argument("--rclone", help="Path to the rclone binary (default: from PATH)")
-    ins.add_argument("--rclone-config", help="rclone config file, if not the default")
+    ins.add_argument("--rclone", help="Path of the rclone binary. The default comes from PATH.")
+    ins.add_argument("--rclone-config", help="rclone config file, if it is not the default one")
     ins.add_argument("--interval", type=int, default=15, help="Seconds between exchanges with the shared folder")
     ins.add_argument("--offline-after", type=int, default=600, help="Seconds of silence before another machine is skipped")
     ins.add_argument("--apply", action="store_true")
-    un = sub.add_parser("uninstall", help="Remove what install added; keeps the memory (dry run unless --apply)")
+    un = sub.add_parser("uninstall", help="Remove what install added. The memory stays. Without --apply it only prints the changes.")
     un.add_argument("--apply", action="store_true")
     return p
 
@@ -66,7 +66,7 @@ def main():
             try:
                 result = client.call("flush_hooks", {"current": current})
             except (ValueError, RuntimeError, OSError) as exc:
-                print(f"OptChat: hook durably queued for replay: {exc}", file=sys.stderr)
+                print(f"OptChat: the hook event is saved on disk and will be delivered later: {exc}", file=sys.stderr)
                 return
             if "hookSpecificOutput" in result:
                 print(json.dumps(result))
@@ -91,7 +91,7 @@ def main():
                 payload = {"event_id": f"import:{identity}:{index}", "kind": record.get("kind", "note"), "text": record["text"]}
                 if "date" in record: payload["date"] = record["date"]
                 client.call("append", payload)
-            result = {"imported": len(records), "instruction": "Use MCP compaction tools for pending summaries."}
+            result = {"imported": len(records), "instruction": "Agents summarize the new messages through the MCP compaction tools."}
         elif args.command in ("export", "backup"):
             result = client.call(args.command, {"path": str(args.output.resolve())})
         elif args.command == "zoom":
