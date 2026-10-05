@@ -171,6 +171,17 @@ class TwoMachines(unittest.TestCase):
         self.assertEqual(self.order(delta), ["g1", "g2", "d1"])
         self.assertEqual(self.order(gamma), self.order(delta))
 
+    def test_messages_with_one_sort_time_keep_their_order(self):
+        delta = self.start("delta", join_grace=5)
+        for k in range(12):
+            self.say(delta, f"d{k}", f"d{k}", k * 0.01)  # all before delta becomes visible
+        for service in (delta, self.a, self.b, delta, self.a, self.b, delta):
+            self.clock.t += 3
+            self.sync(service)
+        expected = [f"d{k}" for k in range(12)]
+        for service in (delta, self.a, self.b):
+            self.assertEqual(self.order(service), expected)
+
     def test_origin_names_the_machine(self):
         self.say(self.a, "a1", "a1", 1)
         self.clock.t += 5

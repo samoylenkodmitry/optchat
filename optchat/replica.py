@@ -204,7 +204,7 @@ class Replica:
         self.started = clock()
         self.synced = False  # no exchange round has completed since start
         # (sort time, gid) of the latest placed message; anything sorting before it is late.
-        self.last_key = max(((self.order_stamp(self.record_for(m)), m.gid) for m in store.root), default=(float("-inf"), ""))
+        self.last_key = max((self.sort_key(self.record_for(m), m.gid) for m in store.root), default=(float("-inf"), "", -1))
         self.keys = {}
         self.board = None
         self.last_sync = None
@@ -272,6 +272,12 @@ class Replica:
                 return max(stamp(r["date"]), stamp(visible))
         return stamp(r["date"])
 
+    def sort_key(self, r, gid):
+        """(sort time, machine, sequence number). The number compares as a number, so
+        /10 comes after /2 when several messages share one sort time."""
+        machine, _, seq = (gid or "").rpartition("/")
+        return (self.order_stamp(r), machine, int(seq) if seq.isdigit() else -1)
+
     def unordered(self):
         return [r for r in chain(self.own, self.remote.values()) if r["gid"] not in self.sealed]
 
@@ -279,7 +285,7 @@ class Replica:
         """Append every message whose position is now agreed (or late) to the local order."""
         if self.board is None:
             return 0
-        pending = sorted(self.unordered(), key=lambda r: (self.order_stamp(r), r["gid"]))
+        pending = sorted(self.unordered(), key=lambda r: self.sort_key(r, r["gid"]))
         if not pending:
             return 0
         now = self.clock()
@@ -289,13 +295,14 @@ class Replica:
         sealed = 0
         for r in pending:
             t = self.order_stamp(r)
-            late = (t, r["gid"]) < self.last_key
+            key = self.sort_key(r, r["gid"])
+            late = key < self.last_key
             if not late and any(w is None or w < t for w in marks.values()):
                 break
             message = self.board.append(r["kind"], r["text"], r["date"], r["origin"], gid=r["gid"])
             self.positions[r["gid"]] = message.i
             self.sealed.add(r["gid"])
-            self.last_key = max(self.last_key, (t, r["gid"]))
+            self.last_key = max(self.last_key, key)
             sealed += 1
         return sealed
 
