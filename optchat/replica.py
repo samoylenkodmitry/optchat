@@ -148,7 +148,9 @@ class RcloneExchange:
     def write(self, rel, data: bytes):
         tmp = f"{rel}.{secrets.token_hex(4)}.tmp"
         self._run("rcat", self._path(tmp), data=data)
-        self._run("moveto", self._path(tmp), self._path(rel))
+        # --ignore-times: without modtimes or common hashes rclone compares by size
+        # only, and would silently keep an old same-size heartbeat.
+        self._run("moveto", "--ignore-times", self._path(tmp), self._path(rel))
 
 
 def make_exchange(config):

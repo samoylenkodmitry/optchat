@@ -1,9 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from optchat.memory import Part
-from optchat.replica import iso
+from optchat.replica import RcloneExchange, iso
 from optchat.service import Service
 
 
@@ -178,3 +179,17 @@ class TwoMachines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RcloneWrites(unittest.TestCase):
+    def test_overwrite_is_forced_even_when_sizes_match(self):
+        calls = []
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            class Done: returncode, stdout, stderr = 0, b"", b""
+            return Done()
+        with patch("optchat.replica.subprocess.run", fake_run):
+            RcloneExchange("remote:optchat", rclone="rclone").write("machines/m-000000/heartbeat.json", b"{}")
+        self.assertEqual(calls[0][:2], ["rclone", "rcat"])
+        self.assertEqual(calls[1][:3], ["rclone", "moveto", "--ignore-times"])
+        self.assertTrue(calls[1][-1].endswith("heartbeat.json"))
