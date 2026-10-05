@@ -71,6 +71,26 @@ class Plan:
                 raise RuntimeError(f"{argv[0]} failed: {proc.stderr.strip() or proc.stdout.strip()}")
 
 
+def launchd_reload(plan, plist):
+    """Stop the running job, wait until launchd has unloaded it, then load the plist again."""
+    target = f"gui/{os.getuid()}/{LABEL}"
+    plan.run(["launchctl", "bootout", target], "stop the running copy", check=False)
+    if not plan.apply:
+        plan.say(f"run: launchctl bootstrap gui/{os.getuid()} {plist} (start now)")
+        return
+    for _ in range(50):
+        if subprocess.run(["launchctl", "print", target], capture_output=True).returncode:
+            break
+        time.sleep(0.2)
+    for attempt in range(3):
+        proc = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], capture_output=True, text=True)
+        if proc.returncode == 0:
+            plan.say(f"run: launchctl bootstrap gui/{os.getuid()} {plist} (start now)")
+            return
+        time.sleep(1)
+    raise RuntimeError(f"launchctl bootstrap failed: {proc.stderr.strip()}")
+
+
 def managed_block(text: str, block: str | None) -> str:
     """Add or replace the OptChat section of an instruction file. With block=None, remove it."""
     if BEGIN in text and END in text:
@@ -126,8 +146,7 @@ def install(args):
                                "EnvironmentVariables": env, "RunAtLoad": True, "KeepAlive": True,
                                "StandardOutPath": str(chat / "service.log"), "StandardErrorPath": str(chat / "service.log")}).decode()
         plan.write(plist, body, "start at login and after an exit")
-        plan.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], "reload", check=False)
-        plan.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", plist], "start now")
+        launchd_reload(plan, plist)
     else:
         unit = HOME / ".config/systemd/user/optchat.service"
         body = "\n".join(["[Unit]", "Description=OptChat memory service (it runs no models)", "After=network-online.target", "",
