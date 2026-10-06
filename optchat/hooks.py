@@ -17,8 +17,8 @@ def ignored(event):
     if event.get("agent_id") or event.get("agent_type") == "optchat-compactor":
         return "subagent"
     tool = event.get("tool_name", "")
-    if tool.startswith("mcp__optchat__") or (tool in ("Agent", "Task") and "optchat-compactor" in json_text(event.get("tool_input", {}))):
-        return "memory/compaction traffic"
+    if tool in ("Agent", "Task") and "optchat-compactor" in json_text(event.get("tool_input", {})):
+        return "compaction traffic"
     return None
 
 
@@ -88,6 +88,11 @@ def ingest(service, event):
     # never become a main session through a tool event.
     if service.ledger.session(session) != "main":
         return {"ignored": "session not enrolled by SessionStart"}
+    if tool.startswith("mcp__optchat__"):
+        # The main agent used OptChat, so this chat has the tools. A chat that
+        # started before OptChat was installed has the hooks but not the tools.
+        service.ledger.mark_capable(session)
+        return {"ignored": "memory traffic"}
     keybase = session + ":" + name + ":"
     origin = {"session": session, "agent": "claude"}
     if event.get("cwd"):
@@ -133,7 +138,8 @@ def ingest(service, event):
         # ask while a compactor works.
         board = service.board
         backlog, last = board.backlog(), service.asked.get(session)
-        if not board.worker_active() and (last is None or len(backlog) - last >= ASK_AGAIN):
+        capable = service.ledger.is_capable(session)
+        if capable and not board.worker_active() and (last is None or len(backlog) - last >= ASK_AGAIN):
             service.asked[session] = len(backlog)
             chats = len({m.origin.get("session") for m in backlog})
             here = sum(m.origin.get("session") == session for m in backlog)

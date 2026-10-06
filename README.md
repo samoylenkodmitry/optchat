@@ -100,6 +100,7 @@ A `flock` makes one service the only writer of a chat directory. The operating s
 - The Claude Code and Codex sessions own their context and their cache. Clear a session to start fresh. The agent then reads the memory again.
 - The worker subagent decides the quality of a summary. The server checks order and size, and it checks that the worker read the whole input.
 - The memory keeps no file contents and no tool output. Agents should write what they learned into their replies.
+- A chat that started before OptChat was installed is recorded, but it has no OptChat tools, because Claude Code loads MCP servers when a session starts. OptChat asks about summarization only in chats whose agent has used an OptChat tool. Start a new session to read the memory or to summarize.
 - The log is permanent. Do not paste secrets into recorded sessions.
 
 ## Tests

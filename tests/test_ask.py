@@ -12,6 +12,10 @@ class AskBeforeCompaction(unittest.TestCase):
         self.service = Service(Path(self.temp.name))
         self.service.call("hook", {"hook_event_name": "SessionStart", "session_id": "s"})
         self.n = 0
+        self.use_tools()
+
+    def use_tools(self):
+        self.service.call("hook", {"hook_event_name": "PostToolUse", "session_id": "s", "tool_use_id": "v", "tool_name": "mcp__optchat__view", "tool_input": {}, "tool_response": "view"})
 
     def tearDown(self):
         self.service.close()
@@ -35,6 +39,13 @@ class AskBeforeCompaction(unittest.TestCase):
         self.assertEqual(self.prompt(), "", "follow-up questions in the same chat bring no new request")
         self.note(ASK_AGAIN)
         self.assertIn("ask the user", self.prompt())
+
+    def test_no_question_in_a_chat_without_the_tools(self):
+        self.service.call("hook", {"hook_event_name": "SessionStart", "session_id": "old"})
+        self.note(ASK_MESSAGES)
+        result = self.service.call("hook", {"hook_event_name": "UserPromptSubmit", "session_id": "old", "event_id": "x", "prompt": "hi"})
+        self.assertNotIn("hookSpecificOutput", result)
+        self.assertEqual([m.text for m in self.service.store.root if m.kind == "user"], ["hi"], "the chat is still recorded")
 
     def test_no_question_while_a_compactor_works(self):
         self.note(ASK_MESSAGES)

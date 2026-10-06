@@ -23,6 +23,8 @@ class Ledger:
         self.db.execute("CREATE TABLE IF NOT EXISTS sessions (key TEXT PRIMARY KEY, role TEXT)")
         # Tool calls of a turn that has not ended yet; Stop turns them into one record.
         self.db.execute("CREATE TABLE IF NOT EXISTS turn (key TEXT PRIMARY KEY, session TEXT, at REAL, origin TEXT, item TEXT)")
+        # Chats whose main agent has used an OptChat tool.
+        self.db.execute("CREATE TABLE IF NOT EXISTS capable (session TEXT PRIMARY KEY)")
         if "gid" not in {r[1] for r in self.db.execute("PRAGMA table_info(events)")}:
             raise RuntimeError("delivery.sqlite3 is older than replication. Move it away before you start the service.")
         self.db.commit()
@@ -76,6 +78,13 @@ class Ledger:
             self.db.commit()
         row = self.db.execute("SELECT role FROM sessions WHERE key=?", (key,)).fetchone()
         return row[0] if row else None
+
+    def mark_capable(self, session):
+        self.db.execute("INSERT OR IGNORE INTO capable VALUES (?)", (session,))
+        self.db.commit()
+
+    def is_capable(self, session):
+        return self.db.execute("SELECT 1 FROM capable WHERE session=?", (session,)).fetchone() is not None
 
     def hold(self, key, session, origin, item, at):
         self.db.execute("INSERT OR IGNORE INTO turn VALUES (?,?,?,?,?)", (key, session, at, json_text(origin), json_text(item)))
