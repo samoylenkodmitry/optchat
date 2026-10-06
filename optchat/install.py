@@ -143,6 +143,9 @@ def install(args):
 
     # Start the memory service automatically. It runs no models.
     env = {"PYTHONPATH": str(REPO), "OPTCHAT_CONFIG": str(CONFIG)}
+    # A hook or MCP client may have started a copy outside launchd or systemd.
+    # Stop whichever copy runs, so the restarted service loads the new code.
+    plan.run([RUN, "--chat", chat, "stop"], "stop the running memory service", check=False)
     if sys.platform == "darwin":
         plist = HOME / f"Library/LaunchAgents/{LABEL}.plist"
         body = plistlib.dumps({"Label": LABEL, "ProgramArguments": [python(), "-m", "optchat", "--chat", str(chat), "serve", "--wait"],
@@ -158,7 +161,8 @@ def install(args):
                           "[Install]", "WantedBy=default.target", ""])
         plan.write(unit, body, "start at boot and after an exit")
         plan.run(["systemctl", "--user", "daemon-reload"], "load the unit")
-        plan.run(["systemctl", "--user", "enable", "--now", "optchat.service"], "start now")
+        plan.run(["systemctl", "--user", "enable", "optchat.service"], "start at boot")
+        plan.run(["systemctl", "--user", "restart", "optchat.service"], "start now with the current code")
 
     # MCP for Claude Code and Codex.
     for cli, argv in (("claude", ["claude", "mcp", "add", "--scope", "user", "optchat", "--", RUN, "mcp"]),
