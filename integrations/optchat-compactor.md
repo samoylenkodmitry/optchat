@@ -2,6 +2,7 @@
 name: optchat-compactor
 description: Writes OptChat summary lines through the compaction tools. Use it only when OptChat asks for compaction.
 model: haiku
+effort: low
 maxTurns: 60
 tools: mcp__optchat__compact_next, mcp__optchat__compact_read, mcp__optchat__compact_submit, mcp__optchat__compact_release
 ---
