@@ -5,7 +5,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from . import activity
-from .jobs import ASK_AGAIN
 from .util import atomic_json, json_text, sync_dir, valid_unicode
 
 STALE_TURN = 7200  # Seconds after which an unfinished turn is written out.
@@ -17,8 +16,8 @@ def ignored(event):
     if event.get("agent_id") or event.get("agent_type") == "optchat-compactor":
         return "subagent"
     tool = event.get("tool_name", "")
-    if tool in ("Agent", "Task") and "optchat-compactor" in json_text(event.get("tool_input", {})):
-        return "compaction traffic"
+    if tool.startswith("mcp__optchat__") or (tool in ("Agent", "Task") and "optchat-compactor" in json_text(event.get("tool_input", {}))):
+        return "memory or compaction traffic"
     return None
 
 
@@ -82,17 +81,14 @@ def ingest(service, event):
     tool = event.get("tool_name", "")
     inputs = event.get("tool_input", {})
     if name == "SessionStart":
+        # Enroll the chat. Nothing goes into the context of the agent: the global
+        # instructions already say when to use the memory.
         service.ledger.session(session, "main")
-        return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": "OptChat memory is available. Call mcp__optchat__view and read every page. Use zoom for exact details. A partial view marks the messages that have no summary yet, and their content is unknown until you read them. Start the optchat-compactor subagent only after the user agrees. Do not record compaction work."}}
+        return {"enrolled": session}
     # Only a SessionStart event enrolls a session. A child without agent_id must
     # never become a main session through a tool event.
     if service.ledger.session(session) != "main":
         return {"ignored": "session not enrolled by SessionStart"}
-    if tool.startswith("mcp__optchat__"):
-        # The main agent used OptChat, so this chat has the tools. A chat that
-        # started before OptChat was installed has the hooks but not the tools.
-        service.ledger.mark_capable(session)
-        return {"ignored": "memory traffic"}
     keybase = session + ":" + name + ":"
     origin = {"session": session, "agent": "claude"}
     if event.get("cwd"):
@@ -133,21 +129,4 @@ def ingest(service, event):
         result = append("talk", text, identity)
     else:
         return {"ignored": "unsupported hook"}
-    if result.get("compaction_needed") and name == "UserPromptSubmit":
-        # Ask once per chat, and again only after ASK_AGAIN more messages. Never
-        # ask while a compactor works.
-        board = service.board
-        backlog, last = board.backlog(), service.asked.get(session)
-        capable = service.ledger.is_capable(session)
-        if capable and not board.worker_active() and (last is None or len(backlog) - last >= ASK_AGAIN):
-            service.asked[session] = len(backlog)
-            chats = len({m.origin.get("session") for m in backlog})
-            here = sum(m.origin.get("session") == session for m in backlog)
-            tools = sum(m.kind in ("tool", "echo") for m in backlog)
-            question = (f"OptChat has {len(backlog)} messages from {chats} recorded chat{'s' if chats != 1 else ''} that wait for summaries, "
-                        f"{here} of them from this chat. Summarize them now?")
-            return {"hookSpecificOutput": {"hookEventName": name, "additionalContext":
-                f"OptChat: {len(backlog)} messages wait for summaries ({tools} of them are tool calls or tool results). "
-                f"At the end of your reply, ask the user exactly this question: \"{question}\" "
-                "Start one optchat-compactor subagent in the background only after the user agrees. The user can also type /optchat-compact later."}}
     return {}

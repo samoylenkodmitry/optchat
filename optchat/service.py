@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 
 from .export import backup, export_html
-from .jobs import BATCH_TASKS, JobBoard
+from .jobs import BATCH_TASKS, STATUS_AT, JobBoard
 from .ledger import Ledger
 from .memory import Memory, Part
 from .replica import Replica, make_exchange
@@ -63,7 +63,6 @@ class Service:
         self.token = secrets.token_urlsafe(32)
         atomic_json(self.store.path / "connection.json", {"token": self.token})
         self.snapshots = {}
-        self.asked = {}  # session -> backlog when its agent last asked the user about compaction
         self.snapshot_versions = {}
         self.draining = False
         self.server = None
@@ -100,6 +99,11 @@ class Service:
                     "compaction_needed": self.board.compaction_needed()}
         if method == "view":
             return self.view(args.get("snapshot"), args.get("offset", 0))
+        if method == "search":
+            return {"text": self.memory.search(args["query"], args.get("limit", 20))}
+        if method == "status_line":
+            waiting = len(self.board.backlog())
+            return {"text": f"OptChat: {waiting} to summarize" if waiting >= STATUS_AT else ""}
         if method == "zoom":
             return {"text": self.memory.zoom(args["id"], args["n"])}
         if method == "date":

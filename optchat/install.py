@@ -179,7 +179,11 @@ def install(args):
     if shutil.which("claude") or claude_home.exists():
         settings_path = claude_home / "settings.json"
         settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
-        plan.write(settings_path, json.dumps(merged_hooks(settings, True), indent=2) + "\n", "hooks that record every Claude session")
+        settings = merged_hooks(settings, True)
+        if "statusLine" not in settings:
+            # The backlog shows in the status line, outside the context of any agent.
+            settings["statusLine"] = {"type": "command", "command": f"{RUN} status-line"}
+        plan.write(settings_path, json.dumps(settings, indent=2) + "\n", "hooks that record every Claude session, and the status line")
         plan.write(claude_home / "agents/optchat-compactor.md", (REPO / "integrations/optchat-compactor.md").read_text(), "compaction subagent")
         plan.write(claude_home / "commands/optchat-compact.md", (REPO / "integrations/optchat-compact-command.md").read_text(), "the /optchat-compact command")
 
@@ -207,7 +211,10 @@ def uninstall(args):
             plan.run([cli, "mcp", "remove", "optchat"] + (["--scope", "user"] if cli == "claude" else []), "MCP server", check=False)
     settings_path = HOME / ".claude/settings.json"
     if settings_path.exists():
-        plan.write(settings_path, json.dumps(merged_hooks(json.loads(settings_path.read_text()), False), indent=2) + "\n", "remove OptChat hooks")
+        settings = merged_hooks(json.loads(settings_path.read_text()), False)
+        if settings.get("statusLine", {}).get("command") == f"{RUN} status-line":
+            settings.pop("statusLine")
+        plan.write(settings_path, json.dumps(settings, indent=2) + "\n", "remove OptChat hooks and status line")
     plan.remove(HOME / ".claude/agents/optchat-compactor.md", "compaction subagent")
     plan.remove(HOME / ".claude/commands/optchat-compact.md", "the /optchat-compact command")
     for path in (HOME / ".claude/CLAUDE.md", HOME / ".codex/AGENTS.md"):

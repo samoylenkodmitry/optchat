@@ -170,6 +170,31 @@ class Memory:
             return missing
         return "\n".join(f"{p.start}+{p.n}|{flat(self.text(p))}" for p in children)
 
+    def search(self, query: str, limit: int = 20):
+        """Original messages that contain the most words of the query: the words of
+        the user first, then replies, then the rest; newer before older."""
+        import re
+        if not isinstance(query, str) or type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("Give a query and a limit from 1 to 50.")
+        terms = sorted({t for t in re.findall(r"\w+", query.casefold()) if len(t) > 1})
+        if not terms:
+            raise ValueError("The query has no words.")
+        rank = {"user": 0, "talk": 1, "note": 2, "echo": 3, "tool": 4}
+        hits = []
+        for m in self.store.root:
+            text = m.text.casefold()
+            found = [t for t in terms if t in text]
+            if found:
+                hits.append((-len(found), rank.get(m.kind, 5), -m.i, m, found))
+        hits.sort(key=lambda h: h[:3])
+        lines = []
+        for _, _, _, m, found in hits[:limit]:
+            at = max(0, m.text.casefold().find(found[0]) - 80)
+            snippet = flat(m.text[at:at + 240])
+            lines.append(f"{m.i}+0|{m.compact_source.split(': ', 1)[0]} {m.date[:16]}: {'...' if at else ''}{snippet}{'...' if at + 240 < len(m.text) else ''}")
+        head = f"{len(hits)} messages match; the best {len(lines)} follow. zoom(id, 1) gives a whole message."
+        return head + ("\n" + "\n".join(lines) if lines else "")
+
     def date(self, id: int):
         from datetime import datetime
         if type(id) is not int or not 0 <= id < self.total:

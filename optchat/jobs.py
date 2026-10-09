@@ -18,8 +18,7 @@ TARGET = 480  # Workers aim for this size, so that few lines exceed NODE.
 BATCH_TASKS = 10  # Tasks per job for the service; 1 gives one task per job.
 BATCH_CHARS = 20_000  # Source characters per job, so that a later job fits one page.
 TOOL_CAP = 8_000  # Characters of a tool call or result that a worker sees.
-ASK_MESSAGES, ASK_LINES = 20, 40  # Backlog at which an agent asks the user about a compactor.
-ASK_AGAIN = 50  # More waiting messages before the same chat is asked again.
+STATUS_AT = 30  # Messages that need a worker before the status line shows the backlog.
 
 _SCALE_TEXT = (
     "user@optchat/claude@mac: Keep the log forever and explain why each change matters. "
@@ -40,6 +39,7 @@ class Worker:
     characters: int = 0
     touched: float = 0
     closed: bool = False
+    horizon: int = 0  # Messages that existed when the worker started; later ones wait for the next run.
 
 
 @dataclass
@@ -244,30 +244,39 @@ class JobBoard:
         return bool(self.leases) or any(not w.closed and now - w.touched < idle for w in self.workers.values())
 
     def compaction_needed(self):
-        """True when enough work waits to pay for a new worker, which re-reads the whole view."""
-        return len(self.backlog()) >= ASK_MESSAGES or len(self.offered) >= ASK_LINES
+        """True when enough work waits to show it in the status line."""
+        return len(self.backlog()) >= STATUS_AT
 
     def long_source(self, p):
         return self.state.get(self.state_key(p), {}).get("progress") is not None or len(self.source(p)) > SOURCE_CHUNK
 
-    def pop_ready(self):
+    def pop_ready(self, horizon):
+        later = []
+        found = None
         while self.ready:
-            _, l, i = heapq.heappop(self.ready)
-            p = Part(l, i)
-            if p.key not in self.memory.store.tree and p.key not in self.claimed and not self.blocked(p):
-                return p
-        return None
+            item = heapq.heappop(self.ready)
+            p = Part(item[1], item[2])
+            if p.key in self.memory.store.tree or p.key in self.claimed or self.blocked(p):
+                continue
+            if p.end > horizon:
+                later.append(item)  # Arrived after this worker started.
+                continue
+            found = p
+            break
+        for item in later:
+            heapq.heappush(self.ready, item)
+        return found
 
-    def gather(self):
+    def gather(self, horizon):
         """Tasks for one job: ready merges and the next messages, or one part of a long message."""
-        first = self.pop_ready()
+        first = self.pop_ready(horizon)
         if first is None:
             return [], []
         if self.long_source(first):
             return [Task(first)], []
         tasks, extra, chars, back = [Task(first)], [], len(self.source(first)), []
         while len(tasks) < self.batch_tasks and chars < BATCH_CHARS:
-            p = self.pop_ready()
+            p = self.pop_ready(horizon)
             if p is None:
                 break
             source = self.source(p)
@@ -280,7 +289,7 @@ class JobBoard:
         # of them sees the worker's own lines for the earlier tasks as context.
         if any(t.part == Part(0, self.frontier) for t in tasks):
             j = self.frontier + 1
-            while j < self.memory.total and len(tasks) < self.batch_tasks and chars < BATCH_CHARS:
+            while j < min(self.memory.total, horizon) and len(tasks) < self.batch_tasks and chars < BATCH_CHARS:
                 p = Part(0, j)
                 if p.key in self.claimed or self.blocked(p):
                     break
@@ -326,7 +335,7 @@ class JobBoard:
             if disposable is None:
                 return {"status": "busy", "instruction": "The server has no room for another worker. Return to the parent agent."}
             del self.workers[disposable]
-        state = self.workers.setdefault(worker, Worker(touched=self.clock()))
+        state = self.workers.setdefault(worker, Worker(touched=self.clock(), horizon=self.memory.total))
         state.touched = self.clock()
         existing = next((j for j in self.leases.values() if j.worker == worker), None)
         if existing:
@@ -335,11 +344,16 @@ class JobBoard:
             return {"status": "rotate", "worker": worker, "instruction": "Finish this worker invocation. A new subagent starts with compact_next() without a worker token."}
         if len(self.leases) >= self.limit:
             return {"status": "busy", "worker": worker, "active_jobs": len(self.leases)}
-        tasks, extra = self.gather()
+        tasks, extra = self.gather(state.horizon)
         if not tasks:
-            pending = len(self.offered)
-            blocked = any(self.blocked(Part(*key)) for key in self.offered)
-            return {"status": "blocked" if blocked else "waiting" if pending else "done", "worker": worker, "pending_nodes": pending, "active_jobs": len(self.leases), "instruction": "Return to the parent agent. Do not sleep or poll. A blocked line needs compact_resume after someone fixes its cause."}
+            mine = [key for key in self.offered if Part(*key).end <= state.horizon]
+            blocked = any(self.blocked(Part(*key)) for key in mine)
+            status = "blocked" if blocked else "waiting" if mine else "done"
+            later = self.memory.total - state.horizon
+            return {"status": status, "worker": worker, "pending_nodes": len(mine), "active_jobs": len(self.leases), "arrived_later": later,
+                    "instruction": "Return to the parent agent and report the status in one line. Do not sleep or poll. "
+                                   "Messages that arrived after this worker started wait for a later run, so do not suggest a new run for them. "
+                                   "A blocked line needs compact_resume after someone fixes its cause."}
         if len(tasks) == 1 and self.long_source(tasks[0].part):
             p = tasks[0].part
             entry = self.state.setdefault(self.state_key(p), {})

@@ -16,6 +16,7 @@ TOOLS = [
     tool("status", "Show the compaction backlog and the replication state between machines. The service never runs a model.", readonly=True),
     tool("append", "Record one message of the main chat. Give a stable, unique event_id, so a retry does not create a second copy. Set origin.project to the project root and origin.session to the session id. Set origin.agent to codex or claude. Do not record reasoning or compaction work. Tool calls of subagents stay out of the memory.", {"event_id": STRING, "kind": {"enum": ["user", "talk", "tool", "echo", "note"]}, "text": STRING, "date": STRING, "origin": {"type": "object", "properties": {"project": STRING, "session": STRING, "agent": STRING, "machine": STRING}, "additionalProperties": False}}, ["event_id", "kind", "text"]),
     tool("view", "Read the summary view in pages. Call it without arguments, then follow next_offset with the same snapshot until next_offset is null. A partial view names a pending range of messages that have no summary yet. Do not guess their content. Read the originals with zoom when they matter. The view never contains cut text of a message.", {"snapshot": STRING, "offset": INTEGER}, readonly=True),
+    tool("search", "Find earlier messages of all chats by words, without reading the whole view. Returns up to limit lines (default 20) of the form id+0|origin date: text. The words of the user rank first, newer before older. Call zoom(id, 1) for a whole message.", {"query": STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"], True),
     tool("zoom", "Open the line id+n of the view into the two lines of n/2 messages from which it was made. With n set to 1 it returns the whole original message.", {"id": INTEGER, "n": {"type": "integer", "minimum": 1}}, ["id", "n"], True),
     tool("date", "The date and time of message id.", {"id": INTEGER}, ["id"], True),
     tool("read_message", "Read a long original message in pages, when the host cuts a long zoom result. Follow next_offset until it is null.", {"id": INTEGER, "offset": INTEGER}, ["id", "offset"], True),
@@ -26,7 +27,7 @@ TOOLS = [
     tool("compact_resume", "For the parent agent: resume a paused range from status after the cause of its failures is fixed. Progress is kept and no summary is skipped. Do not call it in a loop.", {"id": INTEGER, "n": {"type": "integer", "minimum": 1}}, ["id", "n"]),
 ]
 
-INSTRUCTIONS = "OptChat stores one memory for all agents of the user. It never runs a model. Read all pages of view before you use the memory, and use zoom for exact details. Start compaction only after the user agrees. Then one subagent works through compact_next and compact_submit. Do not record compaction work or reasoning. A compaction prompt is a task for the worker, and the main agent does not follow it."
+INSTRUCTIONS = "OptChat holds the memory of all chats of the user. It never runs a model. Use it only when the task needs earlier decisions, preferences or work from other chats: start with search, then zoom for whole messages. Read the whole view only for broad context. Summarize only when the user asks. Do not record compaction work or reasoning."
 
 
 def render_result(result):

@@ -26,6 +26,7 @@ def parser():
         cmd = sub.add_parser(name); cmd.add_argument("output", type=Path)
     imp = sub.add_parser("import"); imp.add_argument("source", type=Path)
     sub.add_parser("hook", help="Record a Claude Code hook event (JSON on stdin)")
+    sub.add_parser("status-line", help="One short line for the Claude Code status line; empty when little waits")
     call = sub.add_parser("call", help="Call a memory method with JSON arguments")
     call.add_argument("method"); call.add_argument("arguments", nargs="?", default="{}")
     ins = sub.add_parser("install", help="Set up OptChat for every agent session on this machine. Without --apply it only prints the changes.")
@@ -55,6 +56,13 @@ def main():
         if args.command == "serve":
             from .config import load_config
             asyncio.run(Service(args.chat, config=load_config(args.chat), wait=args.wait).serve()); return
+        if args.command == "status-line":
+            sys.stdin.read()  # Claude Code sends session data; the line does not need it.
+            try:
+                print(Client(args.chat, autostart=False).call("status_line")["text"])
+            except Exception:
+                pass  # Never start a service or show an error in the status line.
+            return
         client = Client(args.chat, autostart=args.command != "stop")
         if args.command == "mcp":
             serve_stdio(client); return

@@ -2,7 +2,7 @@
 
 OptChat keeps one memory for the Claude Code and Codex agents of one user, on all of the user's machines. Each message of a session is stored word for word. This includes the tool calls of the agent and their results.
 
-The messages are folded into a binary tree of one-line summaries. At the start of a session, an agent reads a view of about 128 KB that covers the whole history. Recent messages have one line each, and older lines cover more messages. When a line is too vague, the agent opens it into the two lines from which it was made, down to the original message.
+The messages are folded into a binary tree of one-line summaries. The view, about 128 KB, covers the whole history: recent messages have one line each, and older lines cover more messages. When a line is too vague, an agent opens it into the two lines from which it was made, down to the original message. An agent uses the memory only when its task needs it, and starts with a search by words.
 
 OptChat is an MCP server in Python 3.11 or newer, with no dependencies. It never runs a model and needs no API key. The agents write the summaries themselves. When messages wait for summaries, an agent starts a small subagent, which takes jobs through MCP tools and submits the summary lines.
 
@@ -14,7 +14,7 @@ The idea of a memory that consists of its own compressed history comes from the 
 - Tree: each message gets a summary line of at most 512 bytes. Two neighboring lines merge into one line, two of those merge again, and so on. A short message or a short pair of lines needs no model, because it is its own line.
 - View: a list of tree lines that covers the whole history in about 128 KB. New messages are added at the end. When the view grows too large, the pair that is oldest for its size merges, so detail fades with age.
 - Compaction jobs: a job holds up to 10 tasks, for example consecutive messages or merges of two lines. The first job of a worker brings the view as context, and later jobs bring only the changes. A worker subagent calls `compact_next`, which returns the job text, and answers with `compact_submit`. The reply to a submit holds the next job, so each job costs one request. A worker sees at most 8,000 characters of a tool call or result, and the log keeps the original.
-- Cost: the `optchat-compactor` subagent runs on Claude Haiku. When at least 20 messages or 40 lines wait, the agent asks the user once per chat whether to summarize now, and it starts the subagent only after the user agrees. The question comes again after 50 more messages, and never while a compactor works. The command `/optchat-compact` starts a run at any time.
+- Cost: the `optchat-compactor` subagent runs on Claude Haiku, and only when you type `/optchat-compact`. A run covers the messages that existed when it started. The Claude Code status line shows how many messages wait, once at least 30 wait. Nothing about the backlog goes into the context of an agent.
 - Recording: Claude Code hooks record your prompts and the final replies of the agents word for word. The tool calls of one turn become one short record of what changed and what failed. Exploration is kept only as counts and a few file names, because its content stays on disk. Your answers to agent questions are kept in full. Subagent reports and approved plans are kept up to 4,000 characters. Codex agents record your messages and their final replies with `append`.
 
 ## Several machines without an owner
@@ -50,7 +50,7 @@ The first command prints every change. The second command makes the changes:
 - It writes `~/.config/optchat/config.json`.
 - It starts the service at login, with launchd on macOS or a systemd user unit on Linux.
 - It registers the `optchat` MCP server for Claude Code and Codex.
-- It adds the recording hooks, the `optchat-compactor` subagent and the `/optchat-compact` command to Claude Code.
+- It adds the recording hooks, the `optchat-compactor` subagent, the `/optchat-compact` command and a status line to Claude Code. An existing status line stays.
 - It appends a short OptChat section to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
 
 Every changed file keeps a backup with a time stamp. `./run uninstall --apply` removes all of this and keeps the memory.
@@ -59,6 +59,7 @@ Without a config file, OptChat keeps a memory for one machine only.
 
 ## MCP tools
 
+- `search(query, limit)`: find earlier messages by words. It returns up to 20 short lines with ids, so an agent does not need the whole view.
 - `view`: read the current view in pages. Follow `next_offset` with the same `snapshot`.
 - `zoom(id, n)`: open line `id+n` into its two halves. With `n` set to 1 it returns the original message.
 - `read_message(id, offset)`: read a long original message in pages.
@@ -100,7 +101,7 @@ A `flock` makes one service the only writer of a chat directory. The operating s
 - The Claude Code and Codex sessions own their context and their cache. Clear a session to start fresh. The agent then reads the memory again.
 - The worker subagent decides the quality of a summary. The server checks order and size, and it checks that the worker read the whole input.
 - The memory keeps no file contents and no tool output. Agents should write what they learned into their replies.
-- A chat that started before OptChat was installed is recorded, but it has no OptChat tools, because Claude Code loads MCP servers when a session starts. OptChat asks about summarization only in chats whose agent has used an OptChat tool. Start a new session to read the memory or to summarize.
+- A chat that started before OptChat was installed is recorded, but it has no OptChat tools, because Claude Code loads MCP servers when a session starts. Start a new session to read the memory or to summarize.
 - The log is permanent. Do not paste secrets into recorded sessions.
 
 ## Tests
