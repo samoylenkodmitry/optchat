@@ -14,7 +14,7 @@ The memory keeps a binary tree of one-line summaries. First each message is comp
 
 Agents see the memory only through these lines. Recent messages get one line each, and older lines cover more messages. Your line stands for its messages for weeks or years. Later it is merged with its neighbor into the line above. An agent can open a line into the two lines from which it was made, down to the original messages. The agent does this only when the words of the line show that the line holds what the agent needs. Anything that your line leaves out is lost to the agents and to every line above it.
 
-The context lists the summary lines up to the end of your task. Use it to find the meaning of references in a message. It also helps you recover detail that your input lost.
+The context lists the newest summary lines before your task. Use it to find the meaning of references in a message. It also helps you recover detail that your input lost.
 
 Goal: a later agent that reads your line can work as well as if it remembered every message in the line. Space is limited, so give space to items by their value.
 

@@ -18,6 +18,7 @@ TARGET = 480  # Workers aim for this size, so that few lines exceed NODE.
 BATCH_TASKS = 10  # Tasks per job for the service; 1 gives one task per job.
 BATCH_CHARS = 20_000  # Source characters per job, so that a later job fits one page.
 TOOL_CAP = 8_000  # Characters of a tool call or result that a worker sees.
+CONTEXT_CHARS = 40_000  # Newest view lines that a worker gets as context.
 STATUS_AT = 30  # Messages that need a worker before the status line shows the backlog.
 
 _SCALE_TEXT = (
@@ -231,7 +232,15 @@ class JobBoard:
             self.enqueue(p)
 
     def context(self, end):
-        return {f"{p.start}+{p.n}": flat(self.memory.text(p)) for p in self.memory.view if p.end <= end and self.memory.built(p)}
+        """The newest summary lines before `end`, up to CONTEXT_CHARS characters."""
+        lines, used = [], 0
+        for p in reversed([p for p in self.memory.view if p.end <= end and self.memory.built(p)]):
+            text = flat(self.memory.text(p))
+            if used + len(text) > CONTEXT_CHARS:
+                break
+            lines.append((f"{p.start}+{p.n}", text))
+            used += len(text)
+        return dict(reversed(lines))
 
     def backlog(self):
         """Messages that still need a worker: unsummarized and too long to be their own line."""

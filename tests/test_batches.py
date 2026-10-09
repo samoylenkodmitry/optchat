@@ -80,6 +80,16 @@ class BatchTests(Fixture, unittest.TestCase):
         self.assertLess(text.count("z"), TOOL_CAP)
         self.assertEqual(len(self.store.root[0].text), 50_010, "the log keeps the original")
 
+    def test_worker_context_holds_only_the_newest_lines(self):
+        import optchat.jobs as jobs
+        for k in range(300):
+            self.board.append("user", f"m{k} " + "x" * 300)  # short enough to be their own lines
+        self.board.append("user", "last " + "y" * 700)
+        context = self.board.context(self.board.frontier)
+        self.assertLessEqual(sum(len(v) for v in context.values()), jobs.CONTEXT_CHARS)
+        self.assertIn(f"{self.board.frontier - 1}+1", context, "the newest line before the task is kept")
+        self.assertNotIn("0+1", context, "old lines are left out")
+
     def test_claimed_tasks_never_go_to_a_second_worker(self):
         for k in range(3):
             self.board.append("user", f"m{k} " + "x" * 700)
