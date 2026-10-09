@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .util import cut_bytes
 
-DIGEST_LIMIT = 800  # Bytes of one turn record; a record of 512 bytes or less needs no worker.
+DIGEST_LIMIT = 420  # Bytes of one turn record. With its origin prefix it stays under 512 bytes, so it is its own summary line and needs no worker.
 REPORT_LIMIT = 4_000  # Characters of a subagent report or a plan.
 IGNORED_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "ToolSearch",
                  "ScheduleWakeup", "Monitor", "ReadNotifications", "ListAgents"}
@@ -200,15 +200,20 @@ def digest(items):
     changed = {}
     for item in groups.get("changed", []):
         changed[item.get("key") or item["text"]] = item["text"]  # The last edit of a file wins.
+    def listed(texts, keep, noun):
+        """The first `keep` entries, and a count of the others."""
+        more = f"; and {len(texts) - keep} more {noun}" if len(texts) > keep else ""
+        return "; ".join(texts[:keep]) + more
+
     out = []
     if changed:
-        out.append("Changed: " + "; ".join(changed.values()))
+        out.append("Changed: " + listed(list(changed.values()), 5, "files"))
     if groups.get("failed"):
-        out.append("Failed: " + "; ".join(i["text"] for i in groups["failed"]))
+        out.append("Failed: " + listed([clip(i["text"], 100) for i in groups["failed"]], 2, "failures"))
     if groups.get("ran"):
-        out.append("Ran: " + "; ".join(i["text"] for i in groups["ran"]))
+        out.append("Ran: " + listed([clip(i["text"], 90) for i in groups["ran"]], 2, "commands"))
     if groups.get("used"):
-        out.append("Used: " + "; ".join(i["text"] for i in groups["used"]))
+        out.append("Used: " + listed([clip(i["text"], 60) for i in groups["used"]], 2, "tool calls"))
     reads = list(dict.fromkeys(i["text"] for i in groups.get("read", [])))
     looked = []
     if reads:
@@ -224,7 +229,7 @@ def digest(items):
         out.append("Looked at: " + ", ".join(looked))
     if not out:
         return None
-    text = "Tool activity of this turn. " + ". ".join(out)
+    text = "Turn activity: " + ". ".join(out)
     if len(text.encode()) > DIGEST_LIMIT:
         text = cut_bytes(text, DIGEST_LIMIT - 4).rsplit(" ", 1)[0] + " ..."
     return text

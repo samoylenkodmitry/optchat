@@ -56,6 +56,12 @@ class Classify(unittest.TestCase):
         self.assertIsNone(digest([]))
         many = [{"group": "ran", "text": "make target" + str(k) + " (ok, 3 lines of output)"} for k in range(100)]
         self.assertLessEqual(len(digest(many).encode()), DIGEST_LIMIT)
+        busy = [{"group": "changed", "text": f"src/f{k}.kt (+1 -1)", "key": str(k)} for k in range(12)] + [
+            {"group": "ran", "text": f"./gradlew task{k} (ok, 9 lines of output)"} for k in range(4)] + [{"group": "read", "text": "a.kt"}]
+        record = digest(busy)
+        self.assertIn("and 7 more files", record)
+        self.assertIn("and 2 more commands", record)
+        self.assertIn("Looked at: read 1 file", record, "every section fits")
 
 
 class TurnRecord(unittest.TestCase):
