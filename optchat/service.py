@@ -128,6 +128,8 @@ class Service:
             return {**self.api.state(key), "target": self.api.run if self.api.running else self.api.run + 1}
         if method == "zoom":
             return {"text": self.memory.zoom(args["id"], args["n"])}
+        if method == "thread":
+            return {"text": self.memory.thread(args["id"], args.get("n", 5))}
         if method == "date":
             return {"text": self.memory.date(args["id"])}
         if method == "read_message":

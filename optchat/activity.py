@@ -19,6 +19,7 @@ from .util import cut_bytes
 DIGEST_LIMIT = 420  # Bytes of one turn record. With its origin prefix it stays under 512 bytes, so it is its own summary line and needs no worker.
 REPORT_LIMIT = 4_000  # Characters of a subagent report or a plan.
 NOTICES = ("<ci-monitor-event>",)  # Notices of the desktop app. They hold no words of the user.
+SUGGESTIONS = re.compile(r"# Overview\s+Generate 0 to 3 hyperpersonalized suggestions")  # The Codex app asks a hidden session for task suggestions. Its prompt names "unread emails" and so matches many searches.
 WRAPPERS = re.compile(r"<(system-reminder|artifact-view-context)\b[^>]*>.*?</\1>", re.S)  # Context that the app adds to a prompt.
 IGNORED_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "ToolSearch",
                  "ScheduleWakeup", "Monitor", "ReadNotifications", "ListAgents"}
@@ -148,7 +149,7 @@ def prompt(text):
     sessions. Returns None for a notice, {"report": tool_use_id, "text": result}
     for the end of a background task, or {"message": (kind, text)}."""
     text = WRAPPERS.sub("", text if isinstance(text, str) else "").strip()
-    if not text or text.startswith(NOTICES):
+    if not text or text.startswith(NOTICES) or SUGGESTIONS.match(text):
         return None
     if text.startswith("<task-notification>"):
         tool, result = inner(text, "tool-use-id"), inner(text, "result")

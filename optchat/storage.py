@@ -44,16 +44,24 @@ class Message:
         return f"{self.kind}{provenance}: {self.text}"
 
     @property
-    def compact_source(self) -> str:
+    def session_tag(self) -> str:
+        session = self.origin.get("session")
+        return "#" + hashlib.sha256(session.encode()).hexdigest()[:6] if session else ""
+
+    @property
+    def label(self) -> str:
+        """`kind@folder~hash/agent@machine#session`, or the kind alone for a message without origin."""
         if not self.origin:
-            return self.source
+            return self.kind
         project = self.origin.get("project")
-        label = (Path(project).name[:40] or "root") + "~" + hashlib.sha256(project.encode()).hexdigest()[:8] if project else "shared"
+        folder = (Path(project).name[:40] or "root") + "~" + hashlib.sha256(project.encode()).hexdigest()[:8] if project else "shared"
         agent = self.origin.get("agent", "agent")[:24]
         machine = "@" + self.origin["machine"][:24] if self.origin.get("machine") else ""
-        session = self.origin.get("session")
-        suffix = "#" + hashlib.sha256(session.encode()).hexdigest()[:6] if session else ""
-        return f"{self.kind}@{label}/{agent}{machine}{suffix}: {self.text}"
+        return f"{self.kind}@{folder}/{agent}{machine}{self.session_tag}"
+
+    @property
+    def compact_source(self) -> str:
+        return f"{self.label}: {self.text}"
 
 
 @dataclass(frozen=True)

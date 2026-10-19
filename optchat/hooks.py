@@ -112,7 +112,7 @@ def ingest(service, event):
             raise ValueError("UserPromptSubmit needs an event_id. The hook client supplies one.")
         item = activity.prompt(event.get("prompt", ""))
         if item is None:
-            return {"ignored": "a notice of the app or of a background task"}
+            return {"ignored": "a notice or a suggestion prompt of an app, or a notice of a background task"}
         if "report" in item:
             # The end of a background subagent. Its launch was recorded as a wait
             # for this report. Background commands and the compactor were not.

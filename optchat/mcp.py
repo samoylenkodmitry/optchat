@@ -16,7 +16,8 @@ TOOLS = [
     tool("status", "The summary backlog and the replication state between machines.", readonly=True),
     tool("append", "Record one message of the chat. A retry with the same event_id adds no copy. Set origin.project to the project root, origin.session to the session id and origin.agent to codex or claude. Never record reasoning.", {"event_id": STRING, "kind": {"enum": ["user", "talk", "tool", "echo", "note"]}, "text": STRING, "date": STRING, "origin": {"type": "object", "properties": {"project": STRING, "session": STRING, "agent": STRING, "machine": STRING}, "additionalProperties": False}}, ["event_id", "kind", "text"]),
     tool("view", "Read the summary view in pages: call it without arguments, then follow next_offset with the same snapshot.", {"snapshot": STRING, "offset": INTEGER}, readonly=True),
-    tool("search", "Find earlier messages by words. Returns up to limit lines (default 10): id+0|origin date: text.", {"query": STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"], True),
+    tool("search", "Find earlier messages by words. Returns up to limit lines (default 10): id+0|kind@folder~hash/agent@machine#session date: text. One chat keeps one #session. Its folder changes when the chat changes directory.", {"query": STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, ["query"], True),
+    tool("thread", "The next n messages (default 5) after message id in its session, as search lines. Continue from the last id.", {"id": INTEGER, "n": {"type": "integer", "minimum": 1, "maximum": 30}}, ["id"], True),
     tool("zoom", "Open view line id+n into the two lines it was made from. n = 1 gives the original message, up to 12,000 characters.", {"id": INTEGER, "n": {"type": "integer", "minimum": 1}}, ["id", "n"], True),
     tool("date", "Date and time of message id.", {"id": INTEGER}, ["id"], True),
     tool("read_message", "Read a long message from offset. Follow next_offset until it is null.", {"id": INTEGER, "offset": INTEGER}, ["id", "offset"], True),
@@ -28,7 +29,7 @@ TOOLS = [
 ]
 # Agents read the memory and hooks record it, so a chat needs only the reading tools.
 # The compactor subagent starts its own server with the job tools.
-MEMORY_TOOLS = [t for t in TOOLS if t["name"] in ("view", "search", "zoom", "date", "read_message")]
+MEMORY_TOOLS = [t for t in TOOLS if t["name"] in ("view", "search", "thread", "zoom", "date", "read_message")]
 JOB_TOOLS = [t for t in TOOLS if t["name"] in ("compact_next", "compact_read", "compact_submit", "compact_release")]
 
 

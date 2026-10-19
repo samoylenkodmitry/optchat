@@ -79,6 +79,20 @@ class Prompts(unittest.TestCase):
         self.prompt(NOTICE.format(tool="toolu_c", summary='Agent "Summarize" finished', result="<result>Status: rotate.</result>"))
         self.assertEqual(self.records(), [])
 
+    def test_codex_suggestion_prompts_stay_out_and_old_ones_stay_out_of_search(self):
+        suggestions = ("# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: /Users/s\n\n"
+                       "# Rules\n\nYour suggestions must be based on recent events; e.g. recent Slack messages, unread emails, newly created issues, etc.")
+        mention = 'Prompts of the Codex app contain "suggestions must be based on recent events; e.g. recent Slack messages, unread emails".'
+        self.assertEqual(self.prompt(suggestions), {"ignored": "a notice or a suggestion prompt of an app, or a notice of a background task"})
+        self.prompt(mention, "p2")
+        self.assertEqual(self.records(), [("user", mention)], "a user message that quotes the prompt is kept")
+        # An older version stored the prompt as a message of the user. The log keeps it, and search skips it.
+        self.service.call("append", {"event_id": "old", "kind": "user", "text": suggestions})
+        self.assertEqual(len(self.service.store.root), 2)
+        lines = self.service.call("search", {"query": "unread emails"})["text"].splitlines()
+        self.assertEqual(lines[0], "1 messages match; the best 1 follow. zoom(id, 1) gives a whole message.")
+        self.assertEqual([l.split("+")[0] for l in lines[1:]], ["0"])
+
     def test_message_from_another_session_and_terminal_command(self):
         self.prompt('<cross-session-message from="uds:/tmp/x.sock" from-session="local_1" from-name="Perf runs" from-mode="bypass">\n'
                     "Regression found: 22 to 8 fps.\n</cross-session-message>")

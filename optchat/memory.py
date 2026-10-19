@@ -8,6 +8,8 @@ from .util import PLACEHOLDER, VIEW, flat, size
 
 
 ZOOM_CHARS = 12_000  # Characters of one message that zoom returns. read_message gives the rest.
+SNIPPET = 240  # Characters of a message in a line of search or thread.
+THREAD_LIMIT = 30  # Most messages that one thread call returns.
 
 
 @dataclass(frozen=True)
@@ -195,13 +197,29 @@ class Memory:
             if kind:
                 hits.append((-len(found), rank.get(kind, 5), -m.i, m, found))
         hits.sort(key=lambda h: h[:3])
-        lines = []
-        for _, _, _, m, found in hits[:limit]:
-            at = max(0, m.text.casefold().find(found[0]) - 80)
-            snippet = flat(m.text[at:at + 240])
-            lines.append(f"{m.i}+0|{m.compact_source.split(': ', 1)[0]} {m.date[:16]}: {'...' if at else ''}{snippet}{'...' if at + 240 < len(m.text) else ''}")
+        lines = [self.line(m, max(0, m.text.casefold().find(found[0]) - 80)) for _, _, _, m, found in hits[:limit]]
         head = f"{len(hits)} messages match; the best {len(lines)} follow. zoom(id, 1) gives a whole message."
         return head + ("\n" + "\n".join(lines) if lines else "")
+
+    @staticmethod
+    def line(m, at: int = 0):
+        """One message as a line of search or thread, from character `at`."""
+        snippet = flat(m.text[at:at + SNIPPET])
+        return f"{m.i}+0|{m.label} {m.date[:16]}: {'...' if at else ''}{snippet}{'...' if at + SNIPPET < len(m.text) else ''}"
+
+    def thread(self, id: int, n: int = 5):
+        """The next n messages after message id that belong to its session, oldest first."""
+        from .activity import stored_kind
+        if type(id) is not int or not 0 <= id < self.total or type(n) is not int or not 1 <= n <= THREAD_LIMIT:
+            raise ValueError(f"Give a message id and an n from 1 to {THREAD_LIMIT}.")
+        first = self.store.root[id]
+        session = first.origin.get("session")
+        if not session:
+            return f"Message {id} has no session."
+        later = [m for m in self.store.root[id + 1:] if m.origin.get("session") == session and stored_kind(m.kind, m.text)]
+        lines = [self.line(m) for m in later[:n]]
+        more = f" thread({later[n - 1].i}, n) continues." if len(later) > n else ""
+        return f"Later messages in {first.session_tag}: {len(later)}; the next {len(lines)} follow.{more}" + ("\n" + "\n".join(lines) if lines else "")
 
     def date(self, id: int):
         from datetime import datetime
