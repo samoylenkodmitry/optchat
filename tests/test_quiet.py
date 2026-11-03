@@ -35,6 +35,18 @@ class QuietMemory(unittest.TestCase):
         self.note(1)
         self.assertEqual(self.service.call("status_line", {})["text"], f"OptChat: {STATUS_AT} to summarize")
 
+    def test_status_line_shows_a_blocked_line_at_any_backlog(self):
+        clock = [0.0]
+        self.service.board.clock = lambda: clock[0]
+        self.note(1)
+        for _ in range(3):
+            claim = self.service.call("compact_next", {})
+            self.service.call("compact_release", {"job": claim["job"], "reason": "no faithful line"})
+            clock[0] += 11
+        self.note(1)  # it waits behind the blocked line
+        self.assertEqual(self.service.call("status_line", {})["text"], "OptChat: 2 to summarize, 1 blocked")
+        self.assertEqual(self.service.call("api_status", {})["blocked"], {"0+1": "no faithful line"})
+
     def test_a_worker_stops_at_the_messages_that_existed_when_it_started(self):
         self.note(3)
         claim = self.service.call("compact_next", {})

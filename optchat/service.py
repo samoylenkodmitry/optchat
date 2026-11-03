@@ -107,15 +107,17 @@ class Service:
             return {"text": self.memory.search(args["query"], args.get("limit", 10))}
         if method == "status_line":
             waiting = len(self.board.backlog())
-            if waiting < STATUS_AT:
+            # A blocked line stops all later summaries, so the line shows it at any backlog.
+            blocked = len(self.board.blocked_lines())
+            if waiting < STATUS_AT and not blocked:
                 return {"text": ""}
             note = self.api.note(self.api.load_key()) if self.api_enabled else ""
-            return {"text": f"OptChat: {waiting} to summarize" + (f", {note}" if note else "")}
+            return {"text": f"OptChat: {waiting} to summarize" + (f", {blocked} blocked" if blocked else "") + (f", {note}" if note else "")}
         if method == "api_key_changed":
             self.api.key_changed()
             return {"shared": bool(self.api_enabled and self.replica.exchange)}
         if method == "api_status":
-            return self.api.state(self.api.load_key())
+            return {**self.api.state(self.api.load_key()), "blocked": self.board.blocked_lines()}
         if method == "api_compact":
             if not self.api_enabled:
                 return {"status": "off", "reason": "this memory has no machine config, so it does not use the API"}

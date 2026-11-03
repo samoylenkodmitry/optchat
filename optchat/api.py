@@ -495,4 +495,7 @@ def compact_command(client, run_path, wait=90, sleep=time.sleep):
         print(f"OptChat API is not available: {state.get('problem', last['result'])}.{hint}")
         return 3
     print(f"OptChat API: {last['result']}, {last['lines']} lines, about ${last['usd']:.4f}.")
+    for line, reason in (state.get("blocked") or {}).items():
+        start, n = line.split("+")
+        print(f"Line {line} failed three times ({reason}), so the later messages wait. After you fix the cause, run: {run_path} call compact_resume '{{\"id\": {start}, \"n\": {n}}}'")
     return 0

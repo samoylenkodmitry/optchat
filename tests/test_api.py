@@ -231,6 +231,10 @@ class CompactCommand(unittest.TestCase):
         self.assertIn(api.BILLING_URL, text)
         done = {"run": 1, "running": False, "last_run": {"result": "done", "lines": 12, "usd": 0.0021}}
         self.assertEqual(self.run_command(self.Client({"status": "ready", "target": 1}, done)), (0, "OptChat API: done, 12 lines, about $0.0021.\n"))
+        blocked = {**done, "last_run": {"result": "blocked", "lines": 0, "usd": 0.0}, "blocked": {"6579+1": "The API worker could not write a faithful line."}}
+        status, text = self.run_command(self.Client({"status": "ready", "target": 1}, blocked))
+        self.assertEqual(status, 0)
+        self.assertIn("""/repo/run call compact_resume '{"id": 6579, "n": 1}'""", text)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 
+from .activity import stored_kind
 from .memory import Memory, Part
 from .prompts import COMPACT, CONTEXT
 from .util import JOBS, NODE, RETRY, TRIES, atomic_json, cap, cut_bytes, flat, size
@@ -20,6 +21,7 @@ BATCH_CHARS = 20_000  # Source characters per job, so that a later job fits one 
 TOOL_CAP = 8_000  # Characters of a tool call or result that a worker sees.
 CONTEXT_CHARS = 40_000  # Newest view lines that a worker gets as context.
 STATUS_AT = 30  # Messages that need a worker before the status line shows the backlog.
+APP_LINE = "(a notice or a prompt of an app, not words of the user or of an agent)"
 
 _SCALE_TEXT = (
     "user@optchat/claude@mac: Keep the log forever and explain why each change matters. "
@@ -160,11 +162,20 @@ class JobBoard:
             if name not in active_workers and now - worker.touched > 1800:
                 del self.workers[name]
 
+    def leaf(self, m):
+        """The source of the line of message m. Older versions stored some notices and
+        prompts of apps as messages. Such a message needs no worker: one fixed line names it."""
+        source = m.compact_source
+        if size(source) > NODE and stored_kind(m.kind, m.text) is None:
+            return f"{m.label}: {APP_LINE}"
+        return source
+
     def source(self, p):
         if p.l == 0:
             m = self.memory.store.root[p.i]
+            source = self.leaf(m)
             # The original stays in the log. A worker needs only the gist of tool output.
-            return cap(m.compact_source, TOOL_CAP) if m.kind in ("tool", "echo") else m.compact_source
+            return cap(source, TOOL_CAP) if m.kind in ("tool", "echo") else source
         return "\n".join(flat(self.memory.store.tree[(p.l - 1, p.i * 2 + j)].text) for j in (0, 1))
 
     def save(self, p, text):
@@ -217,9 +228,12 @@ class JobBoard:
                 blocked.append(p)
                 continue
             # Keep the exact text of a free line. The newlines between child lines stay.
-            source = self.memory.store.root[i].compact_source if l == 0 else "\n".join(self.memory.store.tree[(l - 1, i * 2 + j)].text for j in (0, 1))
+            source = self.leaf(self.memory.store.root[i]) if l == 0 else "\n".join(self.memory.store.tree[(l - 1, i * 2 + j)].text for j in (0, 1))
             if size(source) <= NODE:
-                self.save(p, source)
+                if l == 0 and source.endswith(APP_LINE):
+                    self.finish(p, source)  # Machines with an older version need a worker for it, so they get the line.
+                else:
+                    self.save(p, source)
                 self._promote()
             else:
                 self.nonfree.add(p.key)
@@ -241,7 +255,11 @@ class JobBoard:
     def backlog(self):
         """Messages that still need a worker: unsummarized and too long to be their own line."""
         root, tree = self.memory.store.root, self.memory.store.tree
-        return [m for m in root[self.frontier:] if (0, m.i) not in tree and size(m.compact_source) > NODE]
+        return [m for m in root[self.frontier:] if (0, m.i) not in tree and size(self.leaf(m)) > NODE]
+
+    def blocked_lines(self):
+        """Lines that failed three times, as "id+n" -> reason. Each of them stops the summaries of all later messages until compact_resume."""
+        return {f"{Part(*key).start}+{Part(*key).n}": reason for key, reason in self.failures.items() if self.blocked(Part(*key))}
 
     def long_source(self, p):
         return self.state.get(self.state_key(p), {}).get("progress") is not None or len(self.source(p)) > SOURCE_CHUNK
@@ -291,7 +309,7 @@ class JobBoard:
                     break
                 if p.key not in self.memory.store.tree:
                     source = self.source(p)
-                    if size(self.memory.store.root[j].compact_source) <= NODE:
+                    if size(self.leaf(self.memory.store.root[j])) <= NODE:
                         extra.append((len(tasks), p))  # A short message is its own line.
                     elif self.long_source(p) or chars + len(source) > BATCH_CHARS:
                         break
@@ -369,7 +387,7 @@ class JobBoard:
         for number, task in enumerate(tasks, 1):
             for after, p in extra:
                 if after == number - 1:
-                    parts.append(f"Context: message {p.i} is short and is its own line:\n{self.memory.store.root[p.i].compact_source}")
+                    parts.append(f"Context: message {p.i} is short and is its own line:\n{self.leaf(self.memory.store.root[p.i])}")
             parts.append(self.task_text(number, task))
         prompt = intro + "\nContext update:\n" + update + "\n\n" + rules + "\n\n" + "\n\n".join(parts)
         if state.characters + len(prompt) > self.worker_budget:

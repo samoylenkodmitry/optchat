@@ -93,6 +93,23 @@ class Prompts(unittest.TestCase):
         self.assertEqual(lines[0], "1 messages match; the best 1 follow. zoom(id, 1) gives a whole message.")
         self.assertEqual([l.split("+")[0] for l in lines[1:]], ["0"])
 
+    def test_codex_next_message_requests_stay_out_and_old_ones_need_no_worker(self):
+        from optchat.jobs import APP_LINE
+        request = ("This is an app-generated request for a suggested next user message. The user did not write this message.\n\n"
+                   "Predict the single message this user is most likely to type next from the visible conversation. " + "x" * 600)
+        self.assertEqual(self.prompt(request), {"ignored": "a notice or a suggestion prompt of an app, or a notice of a background task"})
+        self.assertEqual(self.records(), [])
+        # An older version stored it as a message of the user. The API worker wrote no line for it,
+        # so it blocked, and all later messages waited behind it.
+        self.service.call("append", {"event_id": "old", "kind": "user", "text": request})
+        self.service.call("append", {"event_id": "next", "kind": "user", "text": "fix the cache " + "y" * 600})
+        self.assertEqual(self.service.call("status", {})["first_unsummarized"], 1)
+        self.assertEqual(self.service.store.tree[(0, 0)].text, f"user: {APP_LINE}")
+        claim = self.service.call("compact_next", {})
+        self.assertEqual(claim["tasks"], 1)
+        self.assertIn("fix the cache", claim["text"])
+        self.assertNotIn("Predict the single message", claim["text"])
+
     def test_message_from_another_session_and_terminal_command(self):
         self.prompt('<cross-session-message from="uds:/tmp/x.sock" from-session="local_1" from-name="Perf runs" from-mode="bypass">\n'
                     "Regression found: 22 to 8 fps.\n</cross-session-message>")
