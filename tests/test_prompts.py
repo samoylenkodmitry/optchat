@@ -90,7 +90,7 @@ class Prompts(unittest.TestCase):
         self.service.call("append", {"event_id": "old", "kind": "user", "text": suggestions})
         self.assertEqual(len(self.service.store.root), 2)
         lines = self.service.call("search", {"query": "unread emails"})["text"].splitlines()
-        self.assertEqual(lines[0], "1 messages match; the best 1 follow. zoom(id, 1) gives a whole message.")
+        self.assertEqual(lines[0], "Best matches first. zoom(id, 1) gives a whole message.")
         self.assertEqual([l.split("+")[0] for l in lines[1:]], ["0"])
 
     def test_codex_next_message_requests_stay_out_and_old_ones_need_no_worker(self):
@@ -135,8 +135,12 @@ class Prompts(unittest.TestCase):
                 ("talk", "I moved the cache")]):
             self.service.call("append", {"event_id": f"old{k}", "kind": kind, "text": text})
         lines = self.service.call("search", {"query": "cache"})["text"].splitlines()
-        self.assertEqual(lines[0], "3 messages match; the best 3 follow. zoom(id, 1) gives a whole message.")
-        self.assertEqual([line.split("+")[0] for line in lines[1:]], ["0", "4", "1"], "a report stored as a prompt ranks as a report")
+        self.assertEqual(lines[0], "Best matches first. zoom(id, 1) gives a whole message.")
+        self.assertEqual(sorted(line.split("+")[0] for line in lines[1:]), ["0", "1", "4"], "the notice and the launch receipt stay out")
+        report = next(line for line in lines if line.startswith("1+0|"))
+        self.assertTrue(report.startswith("1+0|echo "), "a report stored as a prompt shows as a report")
+        self.assertTrue(self.service.call("zoom", {"id": 1, "n": 1})["text"].startswith("1+0|echo: "))
+        self.assertTrue(self.service.call("zoom", {"id": 2, "n": 1})["text"].startswith("2+0|notice: "))
 
 
 class HookOutput(unittest.TestCase):

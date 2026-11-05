@@ -35,7 +35,9 @@ class QuietMemory(unittest.TestCase):
         self.note(1)
         self.assertEqual(self.service.call("status_line", {})["text"], f"OptChat: {STATUS_AT} to summarize")
 
-    def test_status_line_shows_a_blocked_line_at_any_backlog(self):
+    def test_a_line_that_fails_three_times_gets_an_automatic_line_and_nothing_waits(self):
+        from optchat.jobs import AUTO_LINE
+        from optchat.util import NODE, size
         clock = [0.0]
         self.service.board.clock = lambda: clock[0]
         self.note(1)
@@ -43,9 +45,16 @@ class QuietMemory(unittest.TestCase):
             claim = self.service.call("compact_next", {})
             self.service.call("compact_release", {"job": claim["job"], "reason": "no faithful line"})
             clock[0] += 11
-        self.note(1)  # it waits behind the blocked line
-        self.assertEqual(self.service.call("status_line", {})["text"], "OptChat: 2 to summarize, 1 blocked")
-        self.assertEqual(self.service.call("api_status", {})["blocked"], {"0+1": "no faithful line"})
+        line = self.service.store.tree[(0, 0)].text
+        self.assertTrue(line.startswith(f"note: {AUTO_LINE} note 1 xxx"), line)
+        self.assertLessEqual(size(line), NODE)
+        self.assertTrue(line.endswith("..."))
+        self.note(1)
+        status = self.service.call("status", {})
+        self.assertEqual((status["first_unsummarized"], status["failures"]), (1, {}))
+        self.assertEqual(self.service.call("api_status", {})["blocked"], {})
+        self.assertEqual(self.service.call("compact_next", {})["tasks"], 1, "the next message gets a worker")
+        self.assertEqual(self.service.replica.lookup(self.service.board.memory.view[0]), line, "the line is shared with the other machines")
 
     def test_a_worker_stops_at_the_messages_that_existed_when_it_started(self):
         self.note(3)
@@ -88,7 +97,7 @@ class QuietMemory(unittest.TestCase):
             self.service.call("append", {"event_id": f"s{k}", "kind": "user", "text": text})
         result = self.service.call("search", {"query": "default flavor", "limit": 5})["text"]
         lines = result.splitlines()
-        self.assertTrue(lines[0].startswith("31 messages match; the best 5 follow."))
+        self.assertEqual(lines[0], "Best matches first. zoom(id, 1) gives a whole message.")
         self.assertIn("the default flavor is internal", lines[1], "the line with both words ranks first")
         self.assertEqual(len(lines), 6)
         self.assertNotIn("unrelated", result)

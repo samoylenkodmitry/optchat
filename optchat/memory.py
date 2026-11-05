@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 
 from .storage import Store
@@ -10,6 +11,15 @@ from .util import PLACEHOLDER, VIEW, flat, size
 ZOOM_CHARS = 12_000  # Characters of one message that zoom returns. read_message gives the rest.
 SNIPPET = 240  # Characters of a message in a line of search or thread.
 THREAD_LIMIT = 30  # Most messages that one thread call returns.
+MATCH = 120  # Characters around the match after a summary line.
+SUMMARY_PREFIX = re.compile(r"^(user|talk|tool|echo|note)(@\S*)?: ")  # The line of one message often repeats its label.
+
+
+def shown_kind(m):
+    """The kind of a message as search, thread and zoom show it. Older versions
+    stored subagent reports and app notices as words of the user."""
+    from .activity import stored_kind
+    return stored_kind(m.kind, m.text) or "notice"
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,7 @@ class Memory:
         self.changed = asyncio.Event()
         self.listeners = []
         self.total = 0
+        self.index = None  # Built at the first search.
         for l, i in sorted(store.tree):
             if l == 0 or all((l - 1, i * 2 + j) in self.complete for j in (0, 1)):
                 self.complete.add((l, i))
@@ -168,7 +179,8 @@ class Memory:
         if n & (n - 1) or id % n or id + n > self.total:
             return missing
         if n == 1:
-            source = self.store.root[id].source
+            m = self.store.root[id]
+            source = shown_kind(m) + m.source[len(m.kind):]
             if len(source) <= ZOOM_CHARS:
                 return f"{id}+0|{source}"
             return f"{id}+0|{source[:ZOOM_CHARS]}\n[The message has {len(source)} characters. read_message({id}, {ZOOM_CHARS}) gives the rest.]"
@@ -179,33 +191,37 @@ class Memory:
         return "\n".join(f"{p.start}+{p.n}|{flat(self.text(p))}" for p in children)
 
     def search(self, query: str, limit: int = 10):
-        """Original messages that contain the most words of the query: the words of
-        the user first, then replies, then the rest; newer before older."""
-        import re
+        """The messages that match the words of the query best (see search.py)."""
         if not isinstance(query, str) or type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError("Give a query and a limit from 1 to 50.")
-        terms = sorted({t for t in re.findall(r"\w+", query.casefold()) if len(t) > 1})
-        if not terms:
-            raise ValueError("The query has no words.")
-        rank = {"user": 0, "talk": 1, "note": 2, "echo": 3, "tool": 4}
-        from .activity import stored_kind
-        hits = []
-        for m in self.store.root:
-            text = m.text.casefold()
-            found = [t for t in terms if t in text]
-            kind = stored_kind(m.kind, m.text) if found else None
-            if kind:
-                hits.append((-len(found), rank.get(kind, 5), -m.i, m, found))
-        hits.sort(key=lambda h: h[:3])
-        lines = [self.line(m, max(0, m.text.casefold().find(found[0]) - 80)) for _, _, _, m, found in hits[:limit]]
-        head = f"{len(hits)} messages match; the best {len(lines)} follow. zoom(id, 1) gives a whole message."
-        return head + ("\n" + "\n".join(lines) if lines else "")
+        if self.index is None:
+            from .search import Index
+            self.index = Index(self.store)
+        hits = self.index.search(query, limit)
+        if not hits:
+            return "No message holds these words."
+        lines = [self.line(self.store.root[i], word) for i, word in hits]
+        return "Best matches first. zoom(id, 1) gives a whole message.\n" + "\n".join(lines)
+
+    def line(self, m, word: str | None = None):
+        """One message as a line of search or thread. A long message shows its summary
+        line when a model wrote one. Search adds the words around the match when the
+        summary does not hold the matched word."""
+        head = f"{m.i}+0|{shown_kind(m)}{m.label[len(m.kind):]} {m.date[:16]}: "
+        leaf = self.store.tree.get((0, m.i))
+        if len(m.text) > SNIPPET and leaf is not None and leaf.text != m.compact_source:
+            summary = SUMMARY_PREFIX.sub("", flat(leaf.text), count=1)
+            if word is None or word in summary.casefold():
+                return head + summary
+            return head + summary + " Match: " + self.snippet(m.text, word, MATCH)
+        return head + self.snippet(m.text, word, SNIPPET)
 
     @staticmethod
-    def line(m, at: int = 0):
-        """One message as a line of search or thread, from character `at`."""
-        snippet = flat(m.text[at:at + SNIPPET])
-        return f"{m.i}+0|{m.label} {m.date[:16]}: {'...' if at else ''}{snippet}{'...' if at + SNIPPET < len(m.text) else ''}"
+    def snippet(text, word, width):
+        """`width` characters of the text around the first place of the word, or from the start."""
+        found = re.search(r"(?<!\w)" + re.escape(word), text, re.IGNORECASE) if word else None
+        at = max(0, found.start() - width // 3) if found else 0
+        return ("..." if at else "") + flat(text[at:at + width]) + ("..." if at + width < len(text) else "")
 
     def thread(self, id: int, n: int = 5):
         """The next n messages after message id that belong to its session, oldest first."""
@@ -231,7 +247,8 @@ class Memory:
         from .util import json_text
         if type(id) is not int or not 0 <= id < self.total or type(offset) is not int or offset < 0:
             raise ValueError("Invalid message id or character offset")
-        text = self.store.root[id].source
+        m = self.store.root[id]
+        text = shown_kind(m) + m.source[len(m.kind):]  # The same text as zoom, so its offsets match.
         if offset > len(text):
             raise ValueError("Offset is past the end of the message")
         end = min(len(text), offset + 12_000)

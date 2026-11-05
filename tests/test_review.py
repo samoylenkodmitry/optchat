@@ -94,7 +94,8 @@ class ReviewJobs(Fixture, unittest.TestCase):
         self.assertEqual(self.store.root[0].text, original)
         self.assertEqual(self.board.state, {})
 
-    def test_failed_node_stays_blocked_across_restart_and_can_be_resumed(self):
+    def test_failed_node_gets_an_automatic_line_also_when_an_older_version_left_it_blocked(self):
+        from optchat.jobs import AUTO_LINE, AUTO_MERGE
         clock = [0.0]
         self.board.clock = lambda: clock[0]
         self.board.append('user', 'x' * 1000)
@@ -102,14 +103,23 @@ class ReviewJobs(Fixture, unittest.TestCase):
             job = self.board.next()
             self.board.release(job['job'], 'Cannot faithfully summarize')
             clock[0] += 11
-        self.assertEqual(self.board.next()['status'], 'blocked')
-        self.board = JobBoard(Memory(self.store))
-        self.assertEqual(self.board.next()['status'], 'blocked')
-        self.board.resume(0, 1)
-        job = self.board.next()
-        read_all(self.board, job['job'])
-        self.board.submit(job['job'], 'user: actual reviewed summary')
+        self.assertIn(AUTO_LINE, self.store.tree[(0, 0)].text)
         self.assertEqual(self.board.next()['status'], 'done')
+        # An older version left message 1 blocked in jobs.json.
+        self.board.append('user', 'y' * 1000)
+        (self.store.path / 'jobs.json').write_text(json.dumps({'0:1': {'failures': 3, 'reason': 'empty line'}}))
+        self.board = JobBoard(Memory(self.store), clock=lambda: clock[0])
+        self.assertIn(AUTO_LINE + ' yyy', self.store.tree[(0, 1)].text)
+        self.assertEqual(self.board.blocked_lines(), {})
+        # A merge that fails three times keeps the start of both lines.
+        for _ in range(3):
+            job = self.board.next()
+            self.assertEqual(job['status'], 'claimed')
+            self.board.release(job['job'], 'Cannot merge')
+            clock[0] += 11
+        merged = self.store.tree[(1, 0)].text
+        self.assertTrue(merged.startswith(AUTO_MERGE + ' user: ' + AUTO_LINE), merged)
+        self.assertLessEqual(size(merged), 512)
 
     def test_known_nonfree_source_is_not_reencoded_on_each_append(self):
         self.board.append('user', 'x' * 30000)

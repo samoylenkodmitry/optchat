@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from .activity import stored_kind
 from .memory import Memory, Part
 from .prompts import COMPACT, CONTEXT
-from .util import JOBS, NODE, RETRY, TRIES, atomic_json, cap, cut_bytes, flat, size
+from .util import JOBS, NODE, RETRY, TRIES, atomic_json, cap, cut_bytes, cut_words, flat, size
 
 PAGE = 24_000  # Stays below the common 30,000-character limit for a tool result.
 SOURCE_CHUNK = 48_000
@@ -22,6 +22,8 @@ TOOL_CAP = 8_000  # Characters of a tool call or result that a worker sees.
 CONTEXT_CHARS = 40_000  # Newest view lines that a worker gets as context.
 STATUS_AT = 30  # Messages that need a worker before the status line shows the backlog.
 APP_LINE = "(a notice or a prompt of an app, not words of the user or of an agent)"
+AUTO_LINE = "(no model summary after three failures; the first words follow)"
+AUTO_MERGE = "(no model merge after three failures; the start of both lines follows)"
 
 _SCALE_TEXT = (
     "user@optchat/claude@mac: Keep the log forever and explain why each change matters. "
@@ -95,6 +97,8 @@ class JobBoard:
                 self.offer(Part(0, i))
         for l, i in memory.complete:
             self.offer_parent(Part(l, i))
+        for key in [k for k in self.failures if self.blocked(Part(*k))]:
+            self.fallback(Part(*key))  # Left blocked by an older version.
 
     def state_key(self, p):
         return f"{p.l}:{p.i}"
@@ -138,6 +142,25 @@ class JobBoard:
         self.persist()
         if not self.blocked(p):
             heapq.heappush(self.delayed, (self.clock() + RETRY, *p.key))
+        else:
+            self.fallback(p)
+
+    def fallback(self, p):
+        """Store a line without a model for a part that failed three times. Every later
+        message waits for the lines before it, so one failed part used to stop all of
+        them. The original message stays in the log, and zoom(id, 1) gives it."""
+        if p.key in self.memory.store.tree:
+            return
+        if p.l == 0:
+            m = self.memory.store.root[p.i]
+            line = f"{m.label}: {AUTO_LINE} " + " ".join(m.text.split())
+        else:
+            children = [(self.memory.store.tree.get((p.l - 1, p.i * 2 + j))) for j in (0, 1)]
+            if None in children:
+                return
+            half = (NODE - size(AUTO_MERGE) - 8) // 2
+            line = AUTO_MERGE + " " + " ".join(cut_words(flat(c.text), half) for c in children)
+        self.finish(p, cut_words(line, NODE))
 
     def _promote(self):
         while (0, self.frontier) in self.memory.complete:
@@ -258,7 +281,7 @@ class JobBoard:
         return [m for m in root[self.frontier:] if (0, m.i) not in tree and size(self.leaf(m)) > NODE]
 
     def blocked_lines(self):
-        """Lines that failed three times, as "id+n" -> reason. Each of them stops the summaries of all later messages until compact_resume."""
+        """Lines that failed three times and have no automatic line yet, as "id+n" -> reason. Each of them stops the summaries of all later messages until compact_resume."""
         return {f"{Part(*key).start}+{Part(*key).n}": reason for key, reason in self.failures.items() if self.blocked(Part(*key))}
 
     def long_source(self, p):

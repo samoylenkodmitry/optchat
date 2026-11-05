@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 from .config import config_path
-from .util import atomic_json, json_text
+from .util import atomic_json, json_text, log
 
 KEY_URL = "https://platform.claude.com/settings/keys"
 BILLING_URL = "https://platform.claude.com/settings/billing"
@@ -365,7 +365,7 @@ class ApiCompactor:
             missing = [n for n in numbers if n not in by_task]
             if missing:
                 rejected += 1
-                print(f"API worker: job {job[:8]} has tasks {numbers}, and the answer has no line for {missing} (it has {sorted(by_task)})", file=sys.stderr, flush=True)
+                log(f"API worker: job {job[:8]} has tasks {numbers}, and the answer has no line for {missing} (it has {sorted(by_task)})")
                 if rejected == 3:
                     call("compact_release", {"job": job, "reason": f"Three answers of the API worker had no line for some tasks, last for {missing}."})
                     return None
@@ -386,7 +386,7 @@ class ApiCompactor:
                 if "Unknown or expired job" in str(exc):
                     return None
                 rejected += 1
-                print(f"API worker: the server rejected an answer: {exc}", file=sys.stderr, flush=True)
+                log(f"API worker: the server rejected an answer: {exc}")
                 if rejected == 3:
                     call("compact_release", {"job": job, "reason": f"The server rejected three answers of the API worker: {exc}"})
                     return None

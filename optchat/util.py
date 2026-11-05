@@ -28,6 +28,18 @@ def cut_bytes(text: str, limit: int) -> str:
     return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
 
 
+def cut_words(text: str, limit: int) -> str:
+    """At most `limit` bytes of the text with "..." when it was cut. The cut falls after a
+    whole word when a space is near the end, so a long run without spaces keeps its start."""
+    if size(text) <= limit:
+        return text
+    head = cut_bytes(text, limit - 3)
+    space = head.rfind(" ")
+    if space >= len(head) - 40:
+        head = head[:space]
+    return head.rstrip() + "..."
+
+
 def flat(text: str) -> str:
     return text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
 
@@ -56,6 +68,12 @@ def chunks(text: str, marks: tuple[int, ...] = MARKS) -> list[str]:
     if start < len(text):
         result.append(text[start:])
     return result
+
+
+def log(text: str) -> None:
+    """One line of the service log, with the local time."""
+    import sys
+    print(datetime.now().astimezone().isoformat(timespec="seconds"), text, file=sys.stderr, flush=True)
 
 
 def now() -> str:

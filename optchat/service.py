@@ -22,9 +22,41 @@ from .ledger import Ledger
 from .memory import Memory, Part
 from .replica import Replica, make_exchange
 from .storage import Store, StorageError
-from .util import CAP, VIEW, atomic_json, cap, json_text
+from .util import CAP, VIEW, atomic_json, cap, json_text, log
 
 DEFAULT_CHAT = Path.home() / ".local/share/optchat/chat"
+LOG_LIMIT = 10_000_000  # Bytes of service.log before the service moves it to service.log.1.
+HOUSEKEEPING = 600  # Seconds between two checks of the log size.
+
+
+def rotate_log(chat):
+    """Move service.log to service.log.1 when it is over LOG_LIMIT and the service writes
+    to it, as under launchd. Under systemd the service writes to the journal."""
+    path = Path(chat) / "service.log"
+    try:
+        info = path.stat()
+        same = [fd for fd in (1, 2) if (os.fstat(fd).st_dev, os.fstat(fd).st_ino) == (info.st_dev, info.st_ino)]
+    except OSError:
+        return False
+    if 2 not in same or info.st_size < LOG_LIMIT:
+        return False
+    sys.stdout.flush()
+    sys.stderr.flush()
+    fresh = path.with_name("service.log.new")
+    try:
+        fd = os.open(fresh, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_TRUNC, 0o600)
+    except OSError:
+        return False  # For example a full disk. The service keeps writing to the old file.
+    try:
+        os.replace(path, path.with_name("service.log.1"))
+        os.replace(fresh, path)
+    except OSError:
+        os.close(fd)
+        return False
+    for target in same:
+        os.dup2(fd, target)
+    os.close(fd)
+    return True
 
 
 def endpoint(chat):
@@ -43,7 +75,7 @@ class Service:
         # config=None means a memory for this machine only. The CLI passes the machine
         # config only for the configured chat directory (see config.py).
         self.config = config or {}
-        report = lambda s: print(s, file=sys.stderr, flush=True)
+        report = log
         # wait=True: a managed service (launchd, systemd) waits for the lock and
         # takes over when another copy stops, so it does not exit and restart in a loop.
         self.store = Store(Path(chat), report, wait=wait)
@@ -62,6 +94,7 @@ class Service:
         self.interval = self.config.get("interval", 15)
         self.sync_task = None
         self.api_task = None
+        self.housekeeping_task = None
         # Only the configured memory of a machine uses the API, so tests and scratch memories never spend credit.
         self.api_enabled = bool(self.config)
         self.path = endpoint(chat)
@@ -135,7 +168,7 @@ class Service:
         if method == "date":
             return {"text": self.memory.date(args["id"])}
         if method == "read_message":
-            return {"text": self.memory.read_message(args["id"], args["offset"])}
+            return {"text": self.memory.read_message(args["id"], args.get("offset", 0))}
         if method == "compact_next":
             worker = args.get("worker")
             if worker is not None and (not isinstance(worker, str) or worker not in self.board.workers):
@@ -224,13 +257,13 @@ class Service:
                     os.replace(path, failed / path.name)
                     atomic_json(failed / (path.stem + '.error'), {'error': str(exc)})
                     sync_dir(path.parent)
-                    print(f"Rejected hook retained in {failed / path.name}: {exc}", file=sys.stderr, flush=True)
+                    log(f"Rejected hook retained in {failed / path.name}: {exc}")
                     if path.name == current:
                         result = {'rejected': True, 'error': str(exc)}
                     continue
                 except (RuntimeError, OSError, sqlite3.Error) as exc:
                     # Keep the durable event for recovery; don't silently lose it.
-                    print(f"Queued hook {path.name}: {exc}", file=sys.stderr, flush=True)
+                    log(f"Queued hook {path.name}: {exc}")
                     if path.name == current:
                         result = {"queued": True, "error": str(exc)}
                     self.stopping.set()
@@ -256,9 +289,14 @@ class Service:
                     response = {"error": str(exc)}
                 writer.write((json_text(response) + "\n").encode())
                 await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # The client left before the reply, for example a status line that Claude Code replaced.
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     async def serve(self):
         # Only the flock owner removes a stale socket. No second service can take it over.
@@ -272,10 +310,11 @@ class Service:
             self.sync_task = asyncio.create_task(self.replicate())
         if self.api_enabled:
             self.api_task = asyncio.create_task(self.summarize())
+        self.housekeeping_task = asyncio.create_task(self.housekeeping())
         try:
             await self.stopping.wait()
         finally:
-            tasks = [t for t in (self.sync_task, self.api_task) if t]
+            tasks = [t for t in (self.sync_task, self.api_task, self.housekeeping_task) if t]
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -283,6 +322,15 @@ class Service:
             await self.server.wait_closed()
             self.path.unlink(missing_ok=True)
             self.close()
+
+    async def housekeeping(self):
+        while not self.stopping.is_set():
+            if rotate_log(self.store.path):
+                log("Moved the previous log to service.log.1")
+            try:
+                await asyncio.wait_for(self.stopping.wait(), HOUSEKEEPING)
+            except asyncio.TimeoutError:
+                pass
 
     async def replicate(self):
         """Exchange data with the shared folder every `interval` seconds. Network I/O runs on a worker thread."""
@@ -296,7 +344,7 @@ class Service:
                 # Offline or the folder is unreachable: keep recording locally and
                 # let the offline timeout order messages without the other machines.
                 self.replica.last_error = str(exc)
-                print(f"Replication: {exc}", file=sys.stderr, flush=True)
+                log(f"Replication: {exc}")
                 self.replica.seal()
                 self.board.advance()
             try:
@@ -329,7 +377,7 @@ class Service:
             except Exception as exc:
                 # A fault here must not stop the memory. The subagent can still write the summaries.
                 self.api.pause(api.ApiError("error", f"API worker: {exc}"), key)
-                print(f"API worker: {exc}", file=sys.stderr, flush=True)
+                log(f"API worker: {exc}")
 
     async def exchange(self):
         """One exchange round with the shared folder, and the API key that the machines share through it."""
