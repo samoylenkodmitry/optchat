@@ -48,6 +48,20 @@ class BatchTests(Fixture, unittest.TestCase):
         self.assertEqual(self.board.submit(claim["job"], ["user: b"])["status"], "saved")
         self.assertEqual(self.store.tree[(0, 1)].text, "user: b")
 
+    def test_abandoned_job_gives_each_message_one_task(self):
+        # The API worker abandons its job when a request fails. Its later messages then
+        # sat in the ready queue and in the frontier loop, and one job had them twice.
+        for k in range(3):
+            self.board.append("user", f"m{k} " + "x" * 700)
+        first = self.board.next()
+        self.assertEqual(first["tasks"], 3)
+        self.board.abandon(first["job"])
+        claim = self.board.next()
+        self.assertEqual(claim["tasks"], 3)
+        read_all(self.board, claim)
+        self.assertEqual(self.board.submit(claim["job"], ["user: a", "user: b", "user: c"])["status"], "saved")
+        self.assertEqual(self.memory.first(), 3)
+
     def test_submit_hands_over_the_next_job(self):
         for k in range(4):
             self.board.append("user", f"m{k} " + "x" * 700)

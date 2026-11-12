@@ -312,15 +312,21 @@ class JobBoard:
         if self.long_source(first):
             return [Task(first)], []
         tasks, extra, chars, back = [Task(first)], [], len(self.source(first)), []
+        # An abandoned job puts its later messages back into the ready queue, and the
+        # loop after the frontier below finds them too. A part must be one task only.
+        taken = {first.key}
         while len(tasks) < self.batch_tasks and chars < BATCH_CHARS:
             p = self.pop_ready(horizon)
             if p is None:
                 break
+            if p.key in taken:
+                continue  # The queue held this part twice.
             source = self.source(p)
             if self.long_source(p) or chars + len(source) > BATCH_CHARS:
                 back.append(p)
                 break
             tasks.append(Task(p))
+            taken.add(p.key)
             chars += len(source)
         # Messages after the first unsummarized one can join the same job: each
         # of them sees the worker's own lines for the earlier tasks as context.
@@ -330,7 +336,7 @@ class JobBoard:
                 p = Part(0, j)
                 if p.key in self.claimed or self.blocked(p):
                     break
-                if p.key not in self.memory.store.tree:
+                if p.key not in self.memory.store.tree and p.key not in taken:
                     source = self.source(p)
                     if size(self.leaf(self.memory.store.root[j])) <= NODE:
                         extra.append((len(tasks), p))  # A short message is its own line.
@@ -338,6 +344,7 @@ class JobBoard:
                         break
                     else:
                         tasks.append(Task(p))
+                        taken.add(p.key)
                         chars += len(source)
                 j += 1
         for p in back:
