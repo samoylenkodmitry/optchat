@@ -1,6 +1,6 @@
 """Prompts that the server sends to compaction workers."""
 
-COMPACT = """You write the memory of OptChat. OptChat is one memory for all AI agents of one user. The agents are Claude Code and Codex sessions on several machines and in several projects.
+COMPACT = """You write the memory of OptChat. OptChat is one memory for all AI agents of one user. The agents are Claude Code, Codex and Antigravity sessions on several machines and in several projects.
 
 Each message has a kind:
 - user: words that the user wrote.

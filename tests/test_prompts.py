@@ -80,7 +80,7 @@ class Prompts(unittest.TestCase):
         self.assertEqual(self.records(), [])
 
     def test_codex_suggestion_prompts_stay_out_and_old_ones_stay_out_of_search(self):
-        suggestions = ("# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: /Users/s\n\n"
+        suggestions = ("# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: /path/to/project\n\n"
                        "# Rules\n\nYour suggestions must be based on recent events; e.g. recent Slack messages, unread emails, newly created issues, etc.")
         mention = 'Prompts of the Codex app contain "suggestions must be based on recent events; e.g. recent Slack messages, unread emails".'
         self.assertEqual(self.prompt(suggestions), {"ignored": "a notice or a suggestion prompt of an app, or a notice of a background task"})
@@ -126,6 +126,77 @@ class Prompts(unittest.TestCase):
         self.assertEqual(self.records(), [("user", "rename the flag"), ("user", "and update the docs"), ("talk", "Renamed and updated.")])
         self.assertEqual({m.origin["agent"] for m in self.service.store.root}, {"codex"})
 
+    def test_antigravity_stop_records_main_chat_turns_and_skips_subagents_and_thinking(self):
+        import json
+        logs = Path(self.temp.name) / "logs"
+        logs.mkdir()
+        compact_path = logs / "transcript.jsonl"
+        full_path = logs / "transcript_full.jsonl"
+        write = lambda path, rows: path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+        agy = lambda cid, transcript, cwd=self.temp.name: self.service.call(
+            "flush_hooks",
+            {"current": enqueue(self.service.store.path, {"hookEventName": "Stop", "conversationId": cid, "cwd": cwd, "transcriptPath": str(transcript)}, "antigravity")},
+        )
+        # Subagent transcript: starts with SYSTEM_MESSAGE and has no USER_INPUT.
+        sub_path = logs / "sub.jsonl"
+        write(sub_path, [
+            {"step_index": 0, "source": "SYSTEM", "type": "SYSTEM_MESSAGE", "content": "[Message] sender=main"},
+            {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Subagent finished."},
+        ])
+        self.assertEqual(agy("sub-1", sub_path), {"ignored": "subagent"})
+        self.assertEqual(self.records(), [])
+
+        # Main transcript: transcript_full.jsonl is preferred over truncated transcript.jsonl.
+        write(compact_path, [
+            {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\ntruncated...\n</USER_REQUEST>"},
+            {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "truncated reply", "truncated_fields": ["content"]},
+        ])
+        turn1 = [
+            {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\ninstall optchat\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ntime\n</ADDITIONAL_METADATA>"},
+            {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "thinking": "SECRET THOUGHT", "content": "Checking files...", "tool_calls": [{"name": "read_file", "args": {}}]},
+            {"step_index": 2, "source": "MODEL", "type": "GENERIC", "content": "FILE OUTPUT"},
+            {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "thinking": "MORE SECRET", "content": 'Done. Mentioning "tool_calls" works too.'},
+        ]
+        write(full_path, turn1)
+        agy("main-1", compact_path)
+        agy("main-1", compact_path)  # replayed Stop adds no copies
+        self.assertEqual(self.records(), [
+            ("user", "install optchat"),
+            ("talk", 'Done. Mentioning "tool_calls" works too.'),
+        ])
+        self.assertNotIn("SECRET", str(self.records()))
+        self.assertNotIn("Checking files", str(self.records()))
+        self.assertEqual({m.origin["agent"] for m in self.service.store.root}, {"antigravity"})
+
+        # Turn 2 in a different folder: records only new steps without colliding on turn 1.
+        other_dir = Path(self.temp.name) / "other"
+        other_dir.mkdir()
+        turn2 = turn1 + [
+            {"step_index": 4, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\ncheck status\n</USER_REQUEST>"},
+            {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "All green."},
+        ]
+        write(full_path, turn2)
+        agy("main-1", compact_path, cwd=str(other_dir))
+        self.assertEqual(self.records(), [
+            ("user", "install optchat"),
+            ("talk", 'Done. Mentioning "tool_calls" works too.'),
+            ("user", "check status"),
+            ("talk", "All green."),
+        ])
+        self.assertEqual(self.service.store.root[-1].origin["project"], str(other_dir.resolve()))
+
+        # Existing multi-turn chat seen for the first time records only the latest turn.
+        old_path = logs / "existing.jsonl"
+        write(old_path, [
+            {"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\nold turn\n</USER_REQUEST>"},
+            {"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "old reply"},
+            {"step_index": 2, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\nnew turn\n</USER_REQUEST>"},
+            {"step_index": 3, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "new reply"},
+        ])
+        agy("old-1", old_path)
+        self.assertEqual(self.records()[-2:], [("user", "new turn"), ("talk", "new reply")])
+        self.assertNotIn("old turn", str(self.records()))
+
     def test_search_corrects_records_that_older_versions_stored(self):
         for k, (kind, text) in enumerate([
                 ("user", "where is the cache"),
@@ -161,7 +232,18 @@ class HookOutput(unittest.TestCase):
                 self.assertEqual((stop.returncode, stop.stdout), (0, "{}"))
                 claude = run("claude", {"hook_event_name": "Stop", "last_assistant_message": "hi"})
                 self.assertEqual(claude.stdout, "")
-                self.assertEqual(Client(chat).call("status")["messages"], 2)
+                transcript = Path(temp) / "transcript.jsonl"
+                transcript.write_text("\n".join([
+                    json.dumps({"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>\nfrom agy\n</USER_REQUEST>"}),
+                    json.dumps({"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "content": "agy reply"}),
+                ]) + "\n")
+                agy = subprocess.run(
+                    [sys.executable, "-m", "optchat", "--chat", str(chat), "hook", "--agent", "antigravity"],
+                    input=json.dumps({"hookEventName": "Stop", "conversationId": "a1", "cwd": temp, "transcriptPath": str(transcript)}),
+                    text=True, capture_output=True, timeout=20,
+                )
+                self.assertEqual((agy.returncode, json.loads(agy.stdout)), (0, {"decision": "stop"}))
+                self.assertEqual(Client(chat).call("status")["messages"], 4)
             finally:
                 client = Client(chat, autostart=False)
                 if client.path.exists():

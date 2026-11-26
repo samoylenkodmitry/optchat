@@ -1,6 +1,6 @@
 # OptChat
 
-OptChat keeps one memory for the Claude Code and Codex agents of one user, on all of the user's machines. Your prompts and the final replies of the agents are stored word for word. The tool calls of one turn are kept as one short record, without their output.
+OptChat keeps one memory for the Claude Code, Codex and Antigravity agents of one user, on all of the user's machines. Your prompts and the final replies of the agents are stored word for word. The tool calls of one turn are kept as one short record, without their output.
 
 The messages are folded into a binary tree of one-line summaries. The view, about 128 KB, covers the whole history: recent messages have one line each, and older lines cover more messages. When a line is too vague, an agent opens it into the two lines from which it was made, down to the original message. An agent uses the memory only when its task needs it, and starts with a search by words.
 
@@ -82,6 +82,7 @@ The first command prints every change. The second command makes the changes:
 - It registers the `optchat` MCP server for Claude Code and Codex, with only the six tools that read the memory. Hooks record the chats, so agents never call a tool to record them.
 - It adds the recording hooks, the `optchat-compactor` subagent, the `/optchat-compact` command and a status line to Claude Code. The command tries the API first when a key is stored. An existing status line stays. The subagent starts its own server with the job tools, so other sessions never load them.
 - It adds the recording hooks to `~/.codex/hooks.json`. Codex runs a new hook only after you trust it once with `/hooks`.
+- It installs the `optchat` plugin into `~/.gemini/config/plugins/optchat/` for Antigravity, with the read-only MCP server, a `Stop` hook that records prompts and final replies from the session transcript, and the shared memory rule.
 - It appends a short OptChat section to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
 
 Every changed file keeps a backup with a time stamp. `./run uninstall --apply` removes all of this and keeps the memory.

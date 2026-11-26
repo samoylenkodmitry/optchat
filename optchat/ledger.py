@@ -26,6 +26,7 @@ class Ledger:
         # Tool calls of a turn that has not ended yet; Stop turns them into one record.
         self.db.execute("CREATE TABLE IF NOT EXISTS turn (key TEXT PRIMARY KEY, session TEXT, at REAL, origin TEXT, item TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS reports (tool TEXT PRIMARY KEY, session TEXT, at REAL, label TEXT)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS cursors (session TEXT PRIMARY KEY, step INTEGER)")
         if "gid" not in {r[1] for r in self.db.execute("PRAGMA table_info(events)")}:
             raise RuntimeError("delivery.sqlite3 is older than replication. Move it away before you start the service.")
         self.db.commit()
@@ -72,6 +73,16 @@ class Ledger:
             self.failed = True
             raise
         return gid
+
+    def has(self, key):
+        return self.db.execute("SELECT 1 FROM events WHERE key=?", (key,)).fetchone() is not None
+
+    def cursor(self, session, step=None):
+        if step is not None:
+            self.db.execute("INSERT OR REPLACE INTO cursors VALUES (?,?)", (session, step))
+            self.db.commit()
+        row = self.db.execute("SELECT step FROM cursors WHERE session=?", (session,)).fetchone()
+        return row[0] if row else None
 
     def session(self, key, role=None):
         if role is not None:
