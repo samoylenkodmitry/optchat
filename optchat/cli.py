@@ -10,7 +10,7 @@ from .service import Client, DEFAULT_CHAT, Service
 
 
 def parser():
-    p = argparse.ArgumentParser(description="OptChat: one memory for Claude Code and Codex agents, served over MCP. It runs no model, unless you store an API key with api-key.")
+    p = argparse.ArgumentParser(description="OptChat: one memory for Claude Code, Codex and Antigravity agents, served over MCP. It runs no model, unless you store an API key with api-key.")
     p.add_argument("--chat", type=Path, default=DEFAULT_CHAT)
     sub = p.add_subparsers(dest="command", required=True)
     mcp = sub.add_parser("mcp", help="Serve MCP over stdio, and start the memory service if it is not running")
@@ -28,8 +28,8 @@ def parser():
     for name in ("export", "backup"):
         cmd = sub.add_parser(name); cmd.add_argument("output", type=Path)
     imp = sub.add_parser("import"); imp.add_argument("source", type=Path)
-    hook = sub.add_parser("hook", help="Record a Claude Code or Codex hook event (JSON on stdin)")
-    hook.add_argument("--agent", choices=("claude", "codex"), default="claude", help="The program that runs the hook")
+    hook = sub.add_parser("hook", help="Record a Claude Code, Codex or Antigravity hook event (JSON on stdin)")
+    hook.add_argument("--agent", choices=("claude", "codex", "antigravity"), default="claude", help="The program that runs the hook")
     sub.add_parser("status-line", help="One short line for the Claude Code status line; empty when little waits")
     key = sub.add_parser("api-key", help="Store an Anthropic API key, so that the memory service writes summaries on your API credit")
     key.add_argument("--remove", action="store_true", help="Delete the stored key")
@@ -87,8 +87,13 @@ def main():
             from .hooks import enqueue
             current = enqueue(client.chat, event, args.agent)
             # Codex adds plain output of a prompt hook to the context, and it reads
-            # the output of a Stop hook as JSON. "{}" asks for nothing.
-            done = "{}" if args.agent == "codex" and event.get("hook_event_name") == "Stop" else ""
+            # the output of a Stop hook as JSON. Antigravity reads JSON for every hook.
+            if args.agent == "codex" and event.get("hook_event_name") == "Stop":
+                done = "{}"
+            elif args.agent == "antigravity":
+                done = '{"decision": "stop"}' if event.get("hookEventName") == "Stop" else "{}"
+            else:
+                done = ""
             if current is None:
                 print(done, end="")
                 return

@@ -1,7 +1,8 @@
 import copy
+import json
 import unittest
 
-from optchat.install import BEGIN, END, hook_command, managed_block, merged_hooks
+from optchat.install import BEGIN, END, MCP_ARGS, RUN, antigravity_plugin_files, hook_command, managed_block, merged_hooks
 
 
 class InstallEdits(unittest.TestCase):
@@ -47,6 +48,18 @@ class InstallEdits(unittest.TestCase):
         merged = merged_hooks(old, True)
         self.assertNotIn("PreToolUse", merged["hooks"])
         self.assertIn("PostToolUse", merged["hooks"])
+
+    def test_antigravity_plugin_bundles_mcp_hook_and_rules(self):
+        files = antigravity_plugin_files("## Shared memory (OptChat)\nUse search first.")
+        self.assertEqual(sorted(files), ["hooks.json", "mcp_config.json", "plugin.json", "rules/AGENTS.md"])
+        manifest = json.loads(files["plugin.json"])
+        self.assertEqual(manifest["name"], "optchat")
+        mcp = json.loads(files["mcp_config.json"])
+        self.assertEqual(mcp["mcpServers"]["optchat"], {"command": str(RUN), "args": list(MCP_ARGS)})
+        hooks = json.loads(files["hooks.json"])
+        self.assertEqual(hooks["optchat"]["Stop"], [{"type": "command", "command": hook_command("antigravity"), "timeout": 10}])
+        self.assertTrue(hook_command("antigravity").endswith("hook --agent antigravity"))
+        self.assertEqual(files["rules/AGENTS.md"], "## Shared memory (OptChat)\nUse search first.\n")
 
 
 if __name__ == "__main__":

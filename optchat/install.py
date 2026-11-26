@@ -1,7 +1,7 @@
-"""Set up OptChat for every Claude Code and Codex session on this machine, or remove it.
+"""Set up OptChat for every Claude Code, Codex and Antigravity session on this machine, or remove it.
 
 Without --apply it only prints each change. With --apply it writes the files and
-keeps a backup with a time stamp next to every file that it changes. Uninstall
+keeps a backup with a time stamp next to every shared file that it changes. Uninstall
 removes only what install added, and the memory stays on disk.
 """
 from __future__ import annotations
@@ -31,7 +31,24 @@ MCP_ARGS = ["mcp", "--memory-only"]
 
 
 def hook_command(agent="claude"):
-    return f"{RUN} hook" + (" --agent codex" if agent == "codex" else "")
+    return f"{RUN} hook" + (f" --agent {agent}" if agent != "claude" else "")
+
+
+def antigravity_plugin_files(block: str) -> dict[str, str]:
+    manifest = {
+        "name": "optchat",
+        "displayName": "OptChat",
+        "version": "1.0.0",
+        "description": "Shared memory across Claude Code, Codex and Antigravity sessions.",
+    }
+    mcp = {"mcpServers": {"optchat": {"command": str(RUN), "args": list(MCP_ARGS)}}}
+    hooks = {"optchat": {"Stop": [{"type": "command", "command": hook_command("antigravity"), "timeout": 10}]}}
+    return {
+        "plugin.json": json.dumps(manifest, indent=2) + "\n",
+        "mcp_config.json": json.dumps(mcp, indent=2) + "\n",
+        "hooks.json": json.dumps(hooks, indent=2) + "\n",
+        "rules/AGENTS.md": block.strip() + "\n",
+    }
 
 
 def python():
@@ -46,7 +63,7 @@ class Plan:
     def say(self, text):
         print(("  " if self.apply else "  would ") + text)
 
-    def write(self, path: Path, content: str, why: str):
+    def write(self, path: Path, content: str, why: str, *, backup: bool = True):
         path = path.expanduser()
         old = path.read_text() if path.exists() else None
         if old == content:
@@ -54,7 +71,7 @@ class Plan:
             return
         self.say(f"{'update' if old is not None else 'create'} {path} ({why})")
         if self.apply:
-            if old is not None:
+            if old is not None and backup:
                 shutil.copy2(path, path.with_name(path.name + f".optchat-backup-{self.stamp}"))
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(path.name + ".optchat-tmp")
@@ -66,6 +83,12 @@ class Plan:
             self.say(f"remove {path} ({why})")
             if self.apply:
                 path.unlink()
+
+    def rmdir(self, path: Path):
+        if path.is_dir() and not any(path.iterdir()):
+            self.say(f"remove empty directory {path}")
+            if self.apply:
+                path.rmdir()
 
     def run(self, argv, why, check=True):
         self.say(f"run: {' '.join(map(str, argv))} ({why})")
@@ -228,6 +251,13 @@ def install(args):
     for path in targets:
         old = path.read_text() if path.exists() else ""
         plan.write(path, managed_block(old, block), "adds the OptChat section; your own text stays")
+
+    # Plugin for Antigravity: MCP server, Stop hook and rules in one bundle.
+    agy_config = HOME / ".gemini/config"
+    if agy_config.exists() or (HOME / ".gemini/antigravity").exists() or shutil.which("agy"):
+        plugin = agy_config / "plugins/optchat"
+        for rel, content in antigravity_plugin_files(block).items():
+            plan.write(plugin / rel, content, "Antigravity OptChat plugin", backup=False)
     if not args.apply:
         print("Dry run only. Re-run with --apply to make these changes.")
 
@@ -258,5 +288,10 @@ def uninstall(args):
     for path in (HOME / ".claude/CLAUDE.md", HOME / ".codex/AGENTS.md"):
         if path.exists() and BEGIN in path.read_text():
             plan.write(path, managed_block(path.read_text(), None), "remove the OptChat section")
+    agy_plugin = HOME / ".gemini/config/plugins/optchat"
+    for rel in ("plugin.json", "mcp_config.json", "hooks.json", "rules/AGENTS.md"):
+        plan.remove(agy_plugin / rel, "Antigravity OptChat plugin")
+    plan.rmdir(agy_plugin / "rules")
+    plan.rmdir(agy_plugin)
     if not args.apply:
         print("Dry run only. Re-run with --apply to make these changes.")
